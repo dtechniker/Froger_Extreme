@@ -1,5 +1,7 @@
 # How to move a Frog
 
+<img src="Froger_Extreme (by DTech).jpg" alt="frogger_extrem_interface" width="800">
+
 <div align="center">
 
 🐸 How to move a Frog V1.0 (Froggers Extrem)
