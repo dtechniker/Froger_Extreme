@@ -1,0 +1,4347 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to move a Frog</title>
+
+<!-- PeerJS CDN Integration (für Phase 4 Multiplayer vorbereitet) -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+<style>
+  /* =========================================================
+     AMIGA 16-BIT RETRO PALETTE
+     ========================================================= */
+  :root {
+    --amiga-bg:        #1a1a2e;
+    --amiga-bg-deep:   #0d0d17;
+    --amiga-panel:     #2a2a4a;
+    --amiga-panel-lt:  #3d3d6b;
+    --amiga-border:    #6b6b9e;
+    --amiga-border-lt: #9d9dcf;
+    --amiga-orange:    #ff8c42;
+    --amiga-orange-dk: #cc6a1e;
+    --amiga-cyan:      #4ecdc4;
+    --amiga-magenta:   #ff477e;
+    --amiga-yellow:    #ffd93d;
+    --amiga-green:     #6bcf7f;
+    --amiga-red:       #ff5555;
+    --amiga-grey:      #7a7a8c;
+    --amiga-white:     #eef0ff;
+    --dir-up:          #cfe8ff;
+    --dir-right:       #7fc4f5;
+    --dir-down:        #3f8fd9;
+    --dir-left:        #2350a0;
+    --font-pixel: 'Courier New', 'Consolas', monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+    -webkit-font-smoothing: none;
+    image-rendering: pixelated;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--amiga-bg-deep);
+    font-family: var(--font-pixel);
+    color: var(--amiga-white);
+    overflow-x: hidden;
+  }
+
+  /* CRT / Scanline Overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.0) 0px,
+      rgba(0,0,0,0.0) 2px,
+      rgba(0,0,0,0.18) 3px,
+      rgba(0,0,0,0.18) 4px
+    );
+    mix-blend-mode: multiply;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9998;
+    background: radial-gradient(ellipse at center, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.35) 100%);
+  }
+
+  .crt-glow {
+    text-shadow: 0 0 4px currentColor, 0 0 10px rgba(255,140,66,0.35);
+  }
+
+  #game-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    position: relative;
+  }
+
+  /* =========================================================
+     TITELLEISTE / HEADER
+     ========================================================= */
+  #header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: linear-gradient(180deg, var(--amiga-panel-lt) 0%, var(--amiga-panel) 100%);
+    border-bottom: 3px solid var(--amiga-border);
+    box-shadow: 0 3px 12px rgba(0,0,0,0.5);
+    position: relative;
+    z-index: 20;
+  }
+
+  #header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  #game-title {
+    font-size: 1.4rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: var(--amiga-orange);
+    text-transform: uppercase;
+  }
+
+  #match-status {
+    font-size: 0.75rem;
+    color: var(--amiga-cyan);
+    border: 1px solid var(--amiga-border);
+    padding: 4px 10px;
+    background: var(--amiga-bg-deep);
+    letter-spacing: 1px;
+  }
+
+  #header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #settings-btn {
+    background: var(--amiga-panel);
+    border: 2px solid var(--amiga-border-lt);
+    color: var(--amiga-yellow);
+    font-size: 1.3rem;
+    width: 42px;
+    height: 42px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+  }
+  #settings-btn:hover {
+    background: var(--amiga-panel-lt);
+    transform: rotate(25deg);
+  }
+  #settings-btn:active {
+    transform: rotate(90deg) scale(0.92);
+  }
+  #end-game-btn {
+    background: var(--amiga-panel);
+    border: 2px solid var(--amiga-red);
+    color: var(--amiga-red);
+    font-size: 1.05rem;
+    width: 42px;
+    height: 42px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+  }
+  #end-game-btn:hover {
+    background: var(--amiga-red);
+    color: var(--amiga-white);
+    transform: scale(1.05);
+  }
+  #end-game-btn:active {
+    transform: scale(0.92);
+  }
+
+  /* =========================================================
+     EINSTELLUNGS-MODAL
+     ========================================================= */
+  #modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,5,15,0.75);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 500;
+  }
+  #modal-overlay.open { display: flex; }
+
+  #settings-modal {
+    width: min(440px, 90vw);
+    background: var(--amiga-panel);
+    border: 3px solid var(--amiga-border-lt);
+    border-radius: 4px;
+    box-shadow:
+      0 0 0 2px var(--amiga-bg-deep),
+      0 0 30px rgba(255,140,66,0.25),
+      0 10px 40px rgba(0,0,0,0.6);
+    overflow: hidden;
+    animation: modal-pop 0.18s ease-out;
+  }
+
+  @keyframes modal-pop {
+    from { transform: scale(0.85); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+  }
+
+  #modal-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: repeating-linear-gradient(90deg, var(--amiga-orange-dk), var(--amiga-orange-dk) 4px, var(--amiga-orange) 4px, var(--amiga-orange) 8px);
+    padding: 6px 10px;
+    color: var(--amiga-bg-deep);
+    font-weight: bold;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+  }
+
+  #modal-close {
+    background: var(--amiga-white);
+    border: 2px solid var(--amiga-bg-deep);
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.75rem;
+    line-height: 1;
+    border-radius: 2px;
+  }
+  #modal-close:hover { background: var(--amiga-red); color: var(--amiga-white); }
+
+  #modal-body {
+    padding: 16px 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .modal-section {
+    background: var(--amiga-bg-deep);
+    border: 1px solid var(--amiga-border);
+    border-radius: 4px;
+    padding: 10px 12px;
+  }
+
+  .modal-section h3 {
+    margin: 0 0 8px 0;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--amiga-cyan);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .row + .row { margin-top: 8px; }
+
+  .amiga-btn {
+    background: var(--amiga-panel-lt);
+    border: 2px solid var(--amiga-border-lt);
+    color: var(--amiga-white);
+    font-family: var(--font-pixel);
+    font-size: 0.72rem;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .amiga-btn:hover { background: var(--amiga-orange); color: var(--amiga-bg-deep); }
+  .amiga-btn.active { background: var(--amiga-green); color: var(--amiga-bg-deep); border-color: var(--amiga-green); }
+  .amiga-btn.muted { background: var(--amiga-red); color: var(--amiga-white); }
+
+  #volume-slider {
+    flex: 1;
+    accent-color: var(--amiga-orange);
+    height: 6px;
+    cursor: pointer;
+  }
+
+  .lang-toggle-group {
+    display: flex;
+    gap: 6px;
+  }
+  .lang-btn {
+    flex: 1;
+    padding: 6px 0;
+    text-align: center;
+    border: 2px solid var(--amiga-border-lt);
+    background: var(--amiga-panel-lt);
+    color: var(--amiga-white);
+    cursor: pointer;
+    font-size: 0.72rem;
+    letter-spacing: 1px;
+    border-radius: 3px;
+  }
+  .lang-btn.active { background: var(--amiga-cyan); color: var(--amiga-bg-deep); border-color: var(--amiga-cyan); }
+
+  .kbd-guide {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    font-size: 0.68rem;
+  }
+  .kbd-player {
+    background: var(--amiga-panel);
+    border: 1px solid var(--amiga-border);
+    border-radius: 3px;
+    padding: 8px;
+  }
+  .kbd-player h4 {
+    margin: 0 0 6px 0;
+    font-size: 0.68rem;
+    color: var(--amiga-yellow);
+    letter-spacing: 1px;
+  }
+  .kbd-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 22px);
+    grid-template-rows: repeat(2, 22px);
+    gap: 3px;
+    justify-content: center;
+    margin-bottom: 4px;
+  }
+  .kbd-key {
+    background: var(--amiga-bg-deep);
+    border: 1px solid var(--amiga-border-lt);
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.62rem;
+    color: var(--amiga-white);
+  }
+  .kbd-key.empty { visibility: hidden; }
+  .kbd-note { color: var(--amiga-grey); font-size: 0.62rem; text-align: center; }
+
+  /* =========================================================
+     MAINFRAME - 3 SPALTEN
+     ========================================================= */
+  #mainframe {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 260px minmax(320px, 1fr) 260px;
+    gap: 14px;
+    padding: 16px;
+    align-items: start;
+  }
+
+  @media (max-width: 980px) {
+    #mainframe {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .player-panel {
+    background: var(--amiga-panel);
+    border: 2px solid var(--amiga-border);
+    border-radius: 5px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.4);
+  }
+
+  .panel-heading {
+    text-align: center;
+    font-size: 0.85rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--amiga-orange);
+    border-bottom: 1px solid var(--amiga-border);
+    padding-bottom: 6px;
+  }
+
+  /* --- Match-3 Grid Placeholder --- */
+  .match3-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
+    background: var(--amiga-bg-deep);
+    border: 1px solid var(--amiga-border);
+    padding: 4px;
+    border-radius: 3px;
+  }
+  .match3-cell {
+    aspect-ratio: 1;
+    background: var(--amiga-panel-lt);
+    border: 1px solid var(--amiga-border);
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    line-height: 1;
+    overflow: hidden;
+    min-width: 0;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: background 0.12s;
+  }
+  .match3-cell:hover {
+    background: var(--amiga-panel);
+    border-color: var(--amiga-border-lt);
+  }
+  .match3-cell.piece-up    { color: var(--dir-up); }
+  .match3-cell.piece-right { color: var(--dir-right); }
+  .match3-cell.piece-down  { color: var(--dir-down); }
+  .match3-cell.piece-left  { color: var(--dir-left); }
+  .match3-cell.piece-freeze,
+  .match3-cell.piece-checkpoint,
+  .match3-cell.piece-boost,
+  .match3-cell.piece-destroyer {
+    color: var(--amiga-yellow);
+  }
+  .match3-cell.selected {
+    outline: 2px solid var(--amiga-orange);
+    outline-offset: -2px;
+    background: rgba(255,140,66,0.18);
+  }
+  .match3-cell.matched {
+    animation: match3-flash-shrink 0.32s ease-in forwards;
+  }
+  @keyframes match3-flash-shrink {
+    0%   { background: var(--amiga-white); transform: scale(1); opacity: 1; }
+    35%  { background: var(--amiga-white); transform: scale(1.08); opacity: 1; }
+    100% { background: var(--amiga-white); transform: scale(0); opacity: 0; }
+  }
+
+  /* --- Feld-Zugriff (Gegner-Bereich gesperrt / Zerstörer öffnet ihn gezielt) --- */
+  .match3-grid.grid-locked {
+    opacity: 0.4;
+    filter: grayscale(65%);
+    pointer-events: none;
+  }
+  .match3-grid.grid-destroyer-target {
+    outline: 2px solid var(--amiga-red);
+    outline-offset: 2px;
+    box-shadow: 0 0 16px rgba(255,85,85,0.55);
+    animation: destroyer-pulse 0.8s infinite;
+  }
+  @keyframes destroyer-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,85,85,0.35); }
+    50%      { box-shadow: 0 0 18px rgba(255,85,85,0.85); }
+  }
+
+  /* --- Guthaben-Balken --- */
+  .resource-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .resource-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.62rem;
+  }
+  .resource-label {
+    width: 34px;
+    color: var(--amiga-cyan);
+    letter-spacing: 0.5px;
+  }
+  .resource-track {
+    flex: 1;
+    height: 10px;
+    background: var(--amiga-bg-deep);
+    border: 1px solid var(--amiga-border);
+    border-radius: 2px;
+    overflow: hidden;
+    display: flex;
+  }
+  .resource-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--amiga-green), var(--amiga-cyan));
+  }
+  .resource-value {
+    width: 26px;
+    text-align: right;
+    color: var(--amiga-white);
+  }
+
+  /* --- Steuerkreuz --- */
+  .dpad-wrapper {
+    display: flex;
+    justify-content: center;
+    padding: 6px 0;
+  }
+  .dpad {
+    position: relative;
+    width: 110px;
+    height: 110px;
+  }
+  .dpad-btn {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    background: var(--amiga-panel-lt);
+    border: 2px solid var(--amiga-border-lt);
+    border-radius: 6px;
+    color: var(--amiga-white);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.1s;
+  }
+  .dpad-btn:hover { background: var(--amiga-orange); }
+  .dpad-btn:active { transform: scale(0.9); }
+  .dpad-btn.up    { top: 0;    left: 38px; }
+  .dpad-btn.down  { bottom: 0; left: 38px; }
+  .dpad-btn.left  { left: 0;   top: 38px; }
+  .dpad-btn.right { right: 0;  top: 38px; }
+  .dpad-center {
+    position: absolute;
+    top: 38px; left: 38px;
+    width: 34px; height: 34px;
+    border: 1px dashed var(--amiga-border);
+    border-radius: 50%;
+  }
+  .dpad-btn.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  /* --- Spezial-Slots --- */
+  .special-slots {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+  }
+  .special-slot {
+    width: 44px;
+    height: 44px;
+    background: var(--amiga-bg-deep);
+    border: 2px solid var(--amiga-border-lt);
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    position: relative;
+  }
+  .special-slot.empty {
+    color: var(--amiga-grey);
+    border-style: dashed;
+    font-weight: bold;
+  }
+  .special-slot.filled {
+    color: var(--amiga-yellow);
+    border-color: var(--amiga-yellow);
+    background: rgba(255,217,61,0.08);
+    cursor: pointer;
+  }
+  .special-slot.locked-slot {
+    cursor: default;
+    opacity: 0.45;
+    filter: grayscale(60%);
+  }
+  .special-slot.active-destroyer {
+    border-color: var(--amiga-red);
+    animation: destroyer-pulse 0.8s infinite;
+    cursor: default;
+  }
+  .special-charge-badge {
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    background: var(--amiga-red);
+    color: var(--amiga-white);
+    font-size: 0.55rem;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 2px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--amiga-bg-deep);
+  }
+
+  /* --- Statusbereich --- */
+  .status-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 30px;
+  }
+  .status-effect {
+    background: var(--amiga-bg-deep);
+    border: 1px solid var(--amiga-cyan);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 0.62rem;
+  }
+  .status-effect-name {
+    color: var(--amiga-cyan);
+    margin-bottom: 3px;
+    letter-spacing: 0.5px;
+  }
+  .status-timer-track {
+    height: 5px;
+    background: var(--amiga-panel);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .status-timer-fill {
+    height: 100%;
+    background: var(--amiga-magenta);
+    width: 70%;
+  }
+  .status-empty {
+    text-align: center;
+    color: var(--amiga-grey);
+    font-size: 0.6rem;
+    padding: 8px 0;
+  }
+
+  /* =========================================================
+     MITTLERE SPALTE / CANVAS
+     ========================================================= */
+  #canvas-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #game-canvas-frame {
+    background: var(--amiga-bg-deep);
+    border: 3px solid var(--amiga-border-lt);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 0 24px rgba(78,205,196,0.15), 0 8px 26px rgba(0,0,0,0.5);
+  }
+
+  #game-canvas {
+    display: block;
+    background: #0a1428;
+    border: 1px solid var(--amiga-border);
+    image-rendering: pixelated;
+  }
+
+  #canvas-caption {
+    font-size: 0.62rem;
+    color: var(--amiga-grey);
+    letter-spacing: 1px;
+    text-align: center;
+  }
+
+  /* =========================================================
+     FOOTER
+     ========================================================= */
+  #footer-bar {
+    text-align: center;
+    padding: 10px;
+    background: var(--amiga-panel);
+    border-top: 3px solid var(--amiga-border);
+    font-size: 0.68rem;
+    color: var(--amiga-grey);
+    letter-spacing: 1px;
+  }
+  #footer-bar span {
+    color: var(--amiga-orange);
+  }
+
+  /* Cheat-Flash */
+  @keyframes cheat-flash {
+    0%, 100% { filter: none; }
+    50% { filter: invert(1) hue-rotate(180deg); }
+  }
+  body.cheat-active {
+    animation: cheat-flash 0.4s steps(2) 3;
+  }
+
+  .hidden { display: none !important; }
+
+  /* =========================================================
+     PHASE 4 — ONLINE-PANEL, HISTORIE, SIEGBILDSCHIRM
+     ========================================================= */
+  .amiga-input {
+    flex: 1;
+    background: var(--amiga-bg-deep);
+    border: 2px solid var(--amiga-border-lt);
+    color: var(--amiga-white);
+    font-family: var(--font-pixel);
+    font-size: 0.68rem;
+    padding: 5px 7px;
+    border-radius: 3px;
+  }
+  .amiga-input:focus { outline: none; border-color: var(--amiga-orange); }
+
+  #mode-group .lang-btn {
+    font-size: 0.6rem;
+    padding: 6px 2px;
+  }
+
+  #peer-my-id {
+    color: var(--amiga-cyan);
+    font-size: 0.68rem;
+    word-break: break-all;
+  }
+  #peer-status {
+    font-size: 0.65rem;
+    color: var(--amiga-yellow);
+  }
+  .online-hint {
+    font-size: 0.62rem;
+    color: var(--amiga-grey);
+    line-height: 1.4;
+    margin: 4px 0 8px 0;
+  }
+
+  .powerup-toggle-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .powerup-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--amiga-panel);
+    border: 1px solid var(--amiga-border);
+    border-radius: 3px;
+    padding: 6px 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .powerup-toggle-row:hover {
+    border-color: var(--amiga-border-lt);
+    background: var(--amiga-panel-lt);
+  }
+  .powerup-toggle-row.locked {
+    cursor: default;
+  }
+  .powerup-toggle-row.disabled {
+    opacity: 0.55;
+  }
+  .powerup-toggle-box {
+    font-size: 0.9rem;
+    color: var(--amiga-green);
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .powerup-toggle-row.disabled .powerup-toggle-box {
+    color: var(--amiga-grey);
+  }
+  .powerup-toggle-icon {
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+  .powerup-toggle-desc {
+    font-size: 0.64rem;
+    color: var(--amiga-white);
+    line-height: 1.3;
+  }
+  .powerup-toggle-desc strong {
+    color: var(--amiga-yellow);
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 130px;
+    overflow-y: auto;
+  }
+  .history-entry {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.62rem;
+    background: var(--amiga-panel);
+    border: 1px solid var(--amiga-border);
+    border-radius: 3px;
+    padding: 4px 7px;
+  }
+  .history-entry { align-items: center; }
+  .lb-left { display: flex; align-items: center; gap: 6px; min-width: 56px; }
+  .lb-rank { width: 20px; color: var(--amiga-yellow); }
+  .lb-frog { width: 26px; height: 22px; display: block; }
+  .lb-time { color: var(--amiga-cyan); }
+  #title-notice {
+    margin: 0 0 12px 0;
+    padding: 6px 8px;
+    font-size: 0.7rem;
+    color: var(--amiga-red);
+    border: 1px solid var(--amiga-red);
+    border-radius: 3px;
+    background: rgba(255,85,85,0.1);
+  }
+  .history-entry-empty {
+    opacity: 0.5;
+    border-style: dashed;
+  }
+  .history-date {
+    color: var(--amiga-grey);
+  }
+
+  #victory-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,5,15,0.82);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 300;
+  }
+  #victory-box {
+    background: var(--amiga-panel);
+    border: 3px solid var(--amiga-yellow);
+    border-radius: 6px;
+    padding: 28px 34px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(255,217,61,0.35), 0 10px 40px rgba(0,0,0,0.6);
+    animation: modal-pop 0.25s ease-out;
+  }
+  #victory-title {
+    margin: 0 0 10px 0;
+    font-size: 1.8rem;
+    color: var(--amiga-yellow);
+    letter-spacing: 3px;
+    text-shadow: 0 0 12px rgba(255,217,61,0.7);
+  }
+  #victory-subtitle {
+    margin: 0 0 18px 0;
+    font-size: 0.8rem;
+    color: var(--amiga-white);
+  }
+
+  #victory-result-row {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+    margin: 10px 0 16px 0;
+  }
+  .victory-result-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .victory-frog-icon {
+    width: 52px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--amiga-bg-deep);
+    position: relative;
+  }
+  .victory-frog-icon::before,
+  .victory-frog-icon::after {
+    content: "";
+    position: absolute;
+    top: 10px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--amiga-bg-deep);
+  }
+  .victory-frog-icon::before { left: 14px; }
+  .victory-frog-icon::after { right: 14px; }
+  .victory-frog-icon.frog-color-green {
+    background: var(--amiga-green);
+  }
+  .victory-frog-icon.frog-color-red {
+    background: var(--amiga-red);
+  }
+  .victory-frog-winner {
+    box-shadow: 0 0 14px rgba(255,217,61,0.8);
+  }
+  .victory-frog-loser {
+    opacity: 0.5;
+    filter: grayscale(50%);
+  }
+  .victory-result-label {
+    font-size: 0.68rem;
+    letter-spacing: 1px;
+    font-weight: bold;
+  }
+  .victory-result-col:first-child .victory-result-label {
+    color: var(--amiga-yellow);
+  }
+  .victory-result-col:last-child .victory-result-label {
+    color: var(--amiga-grey);
+  }
+  .victory-result-name {
+    font-size: 0.62rem;
+    color: var(--amiga-white);
+  }
+  .victory-result-me {
+    outline: 2px dashed var(--amiga-yellow);
+    outline-offset: 4px;
+    border-radius: 6px;
+  }
+
+  /* --- Punktestand in der Titelleiste --- */
+  .score-display {
+    font-size: 0.72rem;
+    color: var(--amiga-yellow);
+    letter-spacing: 1px;
+    border: 1px solid var(--amiga-border);
+    padding: 4px 10px;
+    background: var(--amiga-bg-deep);
+  }
+  #match-status.point-flash {
+    color: var(--amiga-yellow);
+    animation: cheat-flash 0.3s steps(2) 2;
+  }
+
+  /* =========================================================
+     TITELBILDSCHIRM
+     ========================================================= */
+  #title-screen {
+    position: fixed;
+    inset: 0;
+    background: rgba(5,5,15,0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 400;
+    padding: 16px;
+  }
+  #title-box {
+    position: relative;
+    width: min(460px, 92vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    background: var(--amiga-panel);
+    border: 3px solid var(--amiga-orange);
+    border-radius: 6px;
+    padding: 26px 28px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(255,140,66,0.3), 0 10px 40px rgba(0,0,0,0.6);
+    animation: modal-pop 0.25s ease-out;
+  }
+  #title-settings-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    background: var(--amiga-panel-lt);
+    border: 2px solid var(--amiga-border-lt);
+    border-radius: 6px;
+    color: var(--amiga-yellow);
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+  }
+  #title-settings-btn:hover {
+    background: var(--amiga-orange);
+    transform: rotate(25deg);
+  }
+  #title-heading {
+    margin: 0 0 4px 0;
+    font-size: 1.6rem;
+    letter-spacing: 2px;
+    color: var(--amiga-orange);
+    text-transform: uppercase;
+  }
+  #title-subheading {
+    margin: 0 0 18px 0;
+    font-size: 0.72rem;
+    color: var(--amiga-grey);
+    letter-spacing: 1px;
+  }
+  #title-box .modal-section {
+    text-align: left;
+    margin-bottom: 14px;
+  }
+  #title-start-btn {
+    margin-top: 6px;
+    width: 100%;
+    font-size: 0.85rem;
+    padding: 12px 0;
+    background: var(--amiga-orange);
+    color: var(--amiga-bg-deep);
+    border-color: var(--amiga-orange);
+    font-weight: bold;
+  }
+  #title-start-btn:hover {
+    background: var(--amiga-yellow);
+    border-color: var(--amiga-yellow);
+  }
+  #title-start-btn:disabled {
+    background: var(--amiga-grey);
+    border-color: var(--amiga-grey);
+    color: var(--amiga-panel);
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(60%);
+  }
+  #title-start-btn:disabled:hover {
+    background: var(--amiga-grey);
+    border-color: var(--amiga-grey);
+  }
+  #title-start-hint {
+    margin: 8px 0 0 0;
+    font-size: 0.65rem;
+    color: var(--amiga-yellow);
+    letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+
+<div id="game-root">
+
+  <!-- ============ TITELLEISTE ============ -->
+  <header id="header-bar">
+    <div id="header-left">
+      <div id="game-title" class="crt-glow">How to move a Frog</div>
+      <div id="match-status">Bereit / Ready</div>
+      <span id="score-display" class="score-display"></span>
+    </div>
+    <div id="header-right">
+      <button id="end-game-btn" title="Spiel beenden / End Game" data-i18n-title="end_game_hint">⏹️</button>
+      <button id="settings-btn" title="Einstellungen / Settings">⚙️</button>
+    </div>
+  </header>
+
+  <!-- ============ TITELBILDSCHIRM ============ -->
+  <div id="title-screen">
+    <div id="title-box">
+      <button id="title-settings-btn" title="Einstellungen / Settings" aria-label="Einstellungen / Settings">⚙️</button>
+      <h1 id="title-heading" class="crt-glow">How to move a Frog</h1>
+      <p id="title-welcome" data-i18n="title_welcome">Willkommen bei Froggers extrem.</p>
+      <p id="title-subheading" data-i18n="title_subheading">Modus &amp; Spieldauer wählen</p>
+      <p id="title-notice" class="hidden"></p>
+
+      <div class="modal-section">
+        <h3 data-i18n="mode_section">Spielmodus</h3>
+        <div class="lang-toggle-group" id="title-mode-group">
+          <button class="lang-btn active" data-mode="ai-easy" data-i18n="mode_ai_easy">KI LEICHT</button>
+          <button class="lang-btn" data-mode="ai-hard" data-i18n="mode_ai_hard">KI SCHWER</button>
+          <button class="lang-btn" data-mode="online" data-i18n="mode_online">ONLINE</button>
+        </div>
+      </div>
+
+      <div class="modal-section hidden" id="title-online-panel">
+        <h3 data-i18n="online_section">Online (PeerJS)</h3>
+        <div class="row">
+          <span data-i18n="online_my_id">Deine ID</span>
+          <span id="title-peer-my-id">–</span>
+        </div>
+        <p class="online-hint" data-i18n="online_host_hint">Diese ID an einen Freund weitergeben, damit er sich verbinden kann — oder unten eine erhaltene ID eingeben, um beizutreten.</p>
+        <div class="row">
+          <input id="title-peer-remote-id" type="text" class="amiga-input" data-i18n-placeholder="online_remote_placeholder" placeholder="Peer-ID eingeben">
+          <button id="title-peer-connect-btn" class="amiga-btn" data-i18n="online_connect">VERBINDEN</button>
+        </div>
+        <div class="row">
+          <span id="title-peer-status" data-i18n="online_status_disconnected">Nicht verbunden</span>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <h3 data-i18n="rounds_section">Spieldauer — Frösche bis zum Sieg</h3>
+        <div class="lang-toggle-group" id="title-rounds-group">
+          <button class="lang-btn active" data-rounds="1">1</button>
+          <button class="lang-btn" data-rounds="2">2</button>
+          <button class="lang-btn" data-rounds="3">3</button>
+        </div>
+      </div>
+
+      <button id="title-start-btn" class="amiga-btn" data-i18n="title_start">SPIEL STARTEN</button>
+      <p id="title-start-hint" class="hidden">Warte auf Online-Verbindung …</p>
+
+      <div class="modal-section">
+        <h3 data-i18n="history_section">Die 5 schnellsten Frösche</h3>
+        <div id="match-history-list" class="history-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EINSTELLUNGS-MODAL ============ -->
+  <div id="modal-overlay">
+    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-text">
+      <div id="modal-titlebar">
+        <span id="modal-title-text" data-i18n="settings_title">EINSTELLUNGEN / SETTINGS</span>
+        <button id="modal-close" aria-label="Close">X</button>
+      </div>
+      <div id="modal-body">
+
+        <!-- Audio -->
+        <div class="modal-section">
+          <h3 data-i18n="audio_section">Audio</h3>
+          <div class="row">
+            <span data-i18n="audio_mute">Ton / Sound</span>
+            <button id="mute-btn" class="amiga-btn active" data-i18n="audio_on">AN / ON</button>
+          </div>
+          <div class="row">
+            <span data-i18n="audio_volume">Lautstärke / Volume</span>
+            <input id="volume-slider" type="range" min="0" max="100" value="70">
+          </div>
+        </div>
+
+        <!-- Spielmodus -->
+        <div class="modal-section">
+          <h3 data-i18n="mode_section">Spielmodus</h3>
+          <div class="lang-toggle-group" id="mode-group">
+            <button class="lang-btn active" data-mode="ai-easy" data-i18n="mode_ai_easy">KI LEICHT</button>
+            <button class="lang-btn" data-mode="ai-hard" data-i18n="mode_ai_hard">KI SCHWER</button>
+            <button class="lang-btn" data-mode="online" data-i18n="mode_online">ONLINE</button>
+          </div>
+        </div>
+
+        <!-- PeerJS Online-Panel -->
+        <div class="modal-section hidden" id="online-panel">
+          <h3 data-i18n="online_section">Online (PeerJS)</h3>
+          <div class="row">
+            <span data-i18n="online_my_id">Deine ID</span>
+            <span id="peer-my-id">–</span>
+          </div>
+          <div class="row">
+            <input id="peer-remote-id" type="text" class="amiga-input" data-i18n-placeholder="online_remote_placeholder" placeholder="Peer-ID eingeben">
+            <button id="peer-connect-btn" class="amiga-btn" data-i18n="online_connect">VERBINDEN</button>
+          </div>
+          <div class="row">
+            <span id="peer-status" data-i18n="online_status_disconnected">Nicht verbunden</span>
+          </div>
+        </div>
+
+        <!-- Sprache -->
+        <div class="modal-section">
+          <h3 data-i18n="lang_section">Sprache / Language</h3>
+          <div class="lang-toggle-group">
+            <button id="lang-de" class="lang-btn active" data-lang="de">DEUTSCH</button>
+            <button id="lang-en" class="lang-btn" data-lang="en">ENGLISH</button>
+          </div>
+        </div>
+
+        <!-- Tastatur-Anleitung -->
+        <div class="modal-section">
+          <h3 data-i18n="kbd_section">Steuerung / Controls</h3>
+          <div class="kbd-guide">
+            <div class="kbd-player">
+              <h4 data-i18n="kbd_p1">GRÜNER FROSCH</h4>
+              <div class="kbd-grid">
+                <div class="kbd-key empty"></div>
+                <div class="kbd-key">W</div>
+                <div class="kbd-key empty"></div>
+                <div class="kbd-key">A</div>
+                <div class="kbd-key">S</div>
+                <div class="kbd-key">D</div>
+              </div>
+              <div class="kbd-note" data-i18n="kbd_p1_note">WASD Bewegung</div>
+            </div>
+            <div class="kbd-player">
+              <h4 data-i18n="kbd_p2">ROTER FROSCH</h4>
+              <div class="kbd-grid">
+                <div class="kbd-key empty"></div>
+                <div class="kbd-key">▲</div>
+                <div class="kbd-key empty"></div>
+                <div class="kbd-key">◄</div>
+                <div class="kbd-key">▼</div>
+                <div class="kbd-key">►</div>
+              </div>
+              <div class="kbd-note" data-i18n="kbd_p2_note">Pfeiltasten Bewegung</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Powerups (einzeln aktivierbar/deaktivierbar) -->
+        <div class="modal-section">
+          <h3 data-i18n="powerups_section">Powerups</h3>
+          <p id="powerup-host-hint" class="online-hint hidden" data-i18n="powerup_host_hint">Online gilt die Einstellung des Hosts für beide Spieler.</p>
+          <div id="powerup-toggle-list" class="powerup-toggle-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SIEGBILDSCHIRM ============ -->
+  <div id="victory-overlay" class="hidden">
+    <div id="victory-box">
+      <h2 id="victory-title">SIEG!</h2>
+      <div id="victory-result-row">
+        <div class="victory-result-col">
+          <div class="victory-frog-icon victory-frog-winner" id="victory-winner-icon"></div>
+          <div class="victory-result-label" data-i18n="victory_winner_label">GEWINNER</div>
+          <div class="victory-result-name" id="victory-winner-name"></div>
+        </div>
+        <div class="victory-result-col">
+          <div class="victory-frog-icon victory-frog-loser" id="victory-loser-icon"></div>
+          <div class="victory-result-label" data-i18n="victory_loser_label">VERLOREN</div>
+          <div class="victory-result-name" id="victory-loser-name"></div>
+        </div>
+      </div>
+      <p id="victory-subtitle"></p>
+      <button id="victory-restart-btn" class="amiga-btn" data-i18n="victory_restart">NEUES SPIEL</button>
+    </div>
+  </div>
+
+  <!-- ============ MAINFRAME (3 SPALTEN) ============ -->
+  <main id="mainframe">
+
+    <!-- ---------- LINKE SPALTE: GRÜNER FROSCH ---------- -->
+    <section class="player-panel" id="panel-p1">
+      <div class="panel-heading" data-i18n="p1_heading">GRÜNER FROSCH</div>
+
+      <div class="match3-grid" id="match3-grid-p1"></div>
+
+      <div class="resource-bars" id="resource-bars-p1"></div>
+
+      <div class="dpad-wrapper">
+        <div class="dpad" id="dpad-p1">
+          <div class="dpad-center"></div>
+          <button class="dpad-btn up"    data-dir="up"    data-player="p1">▲</button>
+          <button class="dpad-btn down"  data-dir="down"  data-player="p1">▼</button>
+          <button class="dpad-btn left"  data-dir="left"  data-player="p1">◄</button>
+          <button class="dpad-btn right" data-dir="right" data-player="p1">►</button>
+        </div>
+      </div>
+
+      <div class="special-slots" id="special-slots-p1"></div>
+
+      <div class="status-area" id="status-area-p1"></div>
+    </section>
+
+    <!-- ---------- MITTLERE SPALTE: CANVAS ---------- -->
+    <section id="canvas-column">
+      <div id="game-canvas-frame">
+        <canvas id="game-canvas" width="480" height="480"></canvas>
+      </div>
+      <div id="canvas-caption" data-i18n="canvas_caption">AMIGA-RETRO FROGGER FELD — Straßen · Fluss · Zielhecke</div>
+    </section>
+
+    <!-- ---------- RECHTE SPALTE: ROTER FROSCH / KI ---------- -->
+    <section class="player-panel" id="panel-p2">
+      <div class="panel-heading" data-i18n="p2_heading">ROTER FROSCH</div>
+
+      <div class="match3-grid" id="match3-grid-p2"></div>
+
+      <div class="resource-bars" id="resource-bars-p2"></div>
+
+      <div class="dpad-wrapper">
+        <div class="dpad" id="dpad-p2">
+          <div class="dpad-center"></div>
+          <button class="dpad-btn up"    data-dir="up"    data-player="p2">▲</button>
+          <button class="dpad-btn down"  data-dir="down"  data-player="p2">▼</button>
+          <button class="dpad-btn left"  data-dir="left"  data-player="p2">◄</button>
+          <button class="dpad-btn right" data-dir="right" data-player="p2">►</button>
+        </div>
+      </div>
+
+      <div class="special-slots" id="special-slots-p2"></div>
+
+      <div class="status-area" id="status-area-p2"></div>
+    </section>
+
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer id="footer-bar">
+    <span>DTech 2026</span> | v1.0.0
+  </footer>
+
+</div>
+
+<script>
+/* =============================================================
+   CONFIG — Zentrales Konfigurationsobjekt
+   ============================================================= */
+const CONFIG = {
+  GAME_TITLE: "How to move a Frog",
+  VERSION: "v1.0.0",
+  AUTHOR: "DTech 2026",
+
+  WORLD_TICK_MS: 2000,          // Welt-Takt: 2 Sekunden
+  MAX_RESOURCE: 10,             // Max. Guthaben pro Richtung
+  MAX_SPECIAL_SLOTS: 2,         // Max. Spezialfähigkeiten im Besitz
+  MATCH3_COLS: 6,
+  MATCH3_ROWS: 6,
+
+  DIRECTIONS: ["up", "down", "left", "right"],
+
+  I18N: {
+    de: {
+      status_waiting: "Bereit",
+      settings_title: "EINSTELLUNGEN",
+      audio_section: "Audio",
+      audio_mute: "Ton",
+      audio_on: "AN",
+      audio_off: "AUS",
+      audio_volume: "Lautstärke",
+      lang_section: "Sprache",
+      kbd_section: "Steuerung",
+      kbd_p1: "GRÜNER FROSCH",
+      kbd_p1_note: "WASD Bewegung",
+      kbd_p2: "ROTER FROSCH",
+      kbd_p2_note: "Pfeiltasten Bewegung",
+      p1_heading: "GRÜNER FROSCH",
+      p2_heading: "ROTER FROSCH",
+      canvas_caption: "AMIGA-RETRO FROGGER FELD — Straßen · Holzbalken · Seerosen · Zielhecke",
+      status_effect_frozen: "Eingefroren",
+      status_effect_checkpoint: "Checkpoint aktiv",
+      special_activate_hint: "Klicken zum Aktivieren",
+      destroyer_label: "ZERSTÖRER",
+      mode_section: "Spielmodus",
+      mode_ai_easy: "KI LEICHT",
+      mode_ai_hard: "KI SCHWER",
+      mode_online: "ONLINE",
+      mode_status_ai_easy: "Vs. KI (Leicht)",
+      mode_status_ai_hard: "Vs. KI (Schwer)",
+      mode_status_online: "Online-Modus",
+      online_section: "Online (PeerJS)",
+      online_my_id: "Deine ID",
+      online_remote_placeholder: "Peer-ID eingeben",
+      online_host_hint: "Diese ID an einen Freund weitergeben, damit er sich verbinden kann — oder unten eine erhaltene ID eingeben, um beizutreten.",
+      online_connect: "VERBINDEN",
+      online_status_disconnected: "Nicht verbunden",
+      online_status_host: "Verbunden (Host)",
+      online_status_guest: "Verbunden (Gast)",
+      powerups_section: "Powerups",
+      powerup_desc_freeze: "Stoppt die Welt für 5 Sekunden (Frost-Overlay).",
+      powerup_desc_checkpoint: "Setzt einen dauerhaften Rettungspunkt auf der aktuellen Grünzeile.",
+      powerup_desc_boost: "Gibt sofort +2 Guthaben auf alle 4 Richtungen.",
+      powerup_desc_destroyer: "Öffnet 5 Klicks lang beide Spielfelder zum gezielten Zerstören.",
+      history_section: "Die 5 schnellsten Frösche",
+      history_empty: "—",
+      history_p1: "Grüner Frosch",
+      history_p2: "Roter Frosch",
+      victory_title: "SIEG!",
+      victory_subtitle: "hat die Zielhecke erreicht!",
+      victory_restart: "NEUES SPIEL",
+      victory_winner_label: "GEWINNER",
+      victory_loser_label: "VERLOREN",
+      title_welcome: "Willkommen bei Froggers extrem.",
+      title_subheading: "Modus & Spieldauer wählen",
+      rounds_section: "Spieldauer — Frösche bis zum Sieg",
+      title_start: "SPIEL STARTEN",
+      title_start_hint: "Warte auf Online-Verbindung …",
+      title_wait_peer_ready: "Warte auf den Mitspieler …",
+      notice_peer_ended: "Der Mitspieler hat das Spiel beendet.",
+      notice_disconnected: "Verbindung zum Mitspieler verloren — das Spiel wurde beendet.",
+      powerup_host_hint: "Online gilt die Einstellung des Hosts für beide Spieler.",
+      title_peer_is_ready: "Mitspieler ist bereit — jetzt SPIEL STARTEN drücken",
+      end_game_hint: "Spiel beenden"
+    },
+    en: {
+      status_waiting: "Ready",
+      settings_title: "SETTINGS",
+      audio_section: "Audio",
+      audio_mute: "Sound",
+      audio_on: "ON",
+      audio_off: "OFF",
+      audio_volume: "Volume",
+      lang_section: "Language",
+      kbd_section: "Controls",
+      kbd_p1: "GREEN FROG",
+      kbd_p1_note: "WASD movement",
+      kbd_p2: "RED FROG",
+      kbd_p2_note: "Arrow key movement",
+      p1_heading: "GREEN FROG",
+      p2_heading: "RED FROG",
+      canvas_caption: "AMIGA-RETRO FROGGER FIELD — Roads · Logs · Lily Pads · Goal Hedge",
+      status_effect_frozen: "Frozen",
+      status_effect_checkpoint: "Checkpoint active",
+      special_activate_hint: "Click to activate",
+      destroyer_label: "DESTROYER",
+      mode_section: "Game Mode",
+      mode_ai_easy: "AI EASY",
+      mode_ai_hard: "AI HARD",
+      mode_online: "ONLINE",
+      mode_status_ai_easy: "Vs. AI (Easy)",
+      mode_status_ai_hard: "Vs. AI (Hard)",
+      mode_status_online: "Online Mode",
+      online_section: "Online (PeerJS)",
+      online_my_id: "Your ID",
+      online_remote_placeholder: "Enter peer ID",
+      online_host_hint: "Share this ID with a friend so they can connect — or enter a received ID below to join.",
+      online_connect: "CONNECT",
+      online_status_disconnected: "Not connected",
+      online_status_host: "Connected (Host)",
+      online_status_guest: "Connected (Guest)",
+      powerups_section: "Powerups",
+      powerup_desc_freeze: "Pauses the world for 5 seconds (frost overlay).",
+      powerup_desc_checkpoint: "Sets a permanent respawn point on the current grass row.",
+      powerup_desc_boost: "Instantly grants +2 to all 4 directions.",
+      powerup_desc_destroyer: "Opens both boards for 5 targeted destroy-clicks.",
+      history_section: "Top 5 Fastest Frogs",
+      history_empty: "—",
+      history_p1: "Green Frog",
+      history_p2: "Red Frog",
+      victory_title: "VICTORY!",
+      victory_subtitle: "reached the goal hedge!",
+      victory_restart: "NEW GAME",
+      victory_winner_label: "WINNER",
+      victory_loser_label: "LOST",
+      title_welcome: "Welcome to Froggers Extreme.",
+      title_subheading: "Choose mode & match length",
+      rounds_section: "Match Length — Frogs to Win",
+      title_start: "START GAME",
+      title_start_hint: "Waiting for online connection …",
+      title_wait_peer_ready: "Waiting for the other player …",
+      notice_peer_ended: "The other player ended the game.",
+      notice_disconnected: "Connection to the other player was lost — the game has ended.",
+      powerup_host_hint: "Online, the host's setting applies to both players.",
+      title_peer_is_ready: "Other player is ready — press START GAME",
+      end_game_hint: "End Game"
+    }
+  }
+};
+
+/* =============================================================
+   STATE — Vorläufiger Layout-Testzustand (Platzhalter für Phase 3/4)
+   ============================================================= */
+const state = {
+  lang: "de",
+  muted: false,
+  volume: 70,
+  mode: "ai-easy",       // 'ai-easy' | 'ai-hard' | 'online' (kein '2P Lokal': nur eine Maus vorhanden)
+  peerRole: null,       // 'host' | 'guest' | null
+  titleNoticeKey: null,
+  cmdSeq: 0,
+  lastCmdTime: 0,
+  guestAckSeq: 0,
+  onlineLocalReady: false,
+  onlineRemoteReady: false,
+  started: false,       // wird erst nach dem Titelbildschirm true
+  gameOver: false,      // gesamtes Match entschieden (Ziel-Anzahl Frösche erreicht)
+  matchConfig: { targetWins: 1 }, // Spieldauer: 1–3 Frösche bis zum Sieg
+  wins: { p1: 0, p2: 0 },
+  destroyerMode: null,  // { ownerId, slotIdx, charges } — globaler Zerstörer-Zustand
+  enabledPowerups: { freeze: true, checkpoint: true, boost: true, destroyer: true },
+  players: {
+    p1: {
+      resources: { up: 5, down: 5, left: 5, right: 5 },
+      specialSlots: [null, null],
+      board: null,
+      selected: null,
+      comboLevel: 0
+    },
+    p2: {
+      resources: { up: 5, down: 5, left: 5, right: 5 },
+      specialSlots: [null, null],
+      board: null,
+      selected: null,
+      comboLevel: 0
+    }
+  }
+};
+
+/* =============================================================
+   RENDER HELPERS
+   ============================================================= */
+function t(key) {
+  return CONFIG.I18N[state.lang][key] || key;
+}
+
+function applyI18n() {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    el.textContent = t(key);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    el.setAttribute("placeholder", t(key));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach(el => {
+    const key = el.getAttribute("data-i18n-title");
+    el.setAttribute("title", t(key));
+  });
+  document.getElementById("mute-btn").textContent = state.muted ? t("audio_off") : t("audio_on");
+  if (typeof updateMatchStatusText === "function") updateMatchStatusText();
+  if (typeof renderMatchHistory === "function") renderMatchHistory();
+  if (typeof renderPowerupToggles === "function") renderPowerupToggles();
+  if (typeof updateStartReadiness === "function") updateStartReadiness();
+}
+
+function buildMatch3Grid(playerId) {
+  // Phase 3: siehe renderMatch3Grid() für die tatsächliche Board-Darstellung.
+  if (typeof renderMatch3Grid === "function") {
+    renderMatch3Grid(playerId);
+  }
+}
+
+function buildResourceBars(playerId) {
+  const container = document.getElementById(`resource-bars-${playerId}`);
+  container.innerHTML = "";
+  const res = state.players[playerId].resources;
+  const labels = { up: "▲ FWD", down: "▼ BCK", left: "◄ LFT", right: "► RGT" };
+
+  CONFIG.DIRECTIONS.forEach(dir => {
+    const value = res[dir];
+    const pct = (value / CONFIG.MAX_RESOURCE) * 100;
+
+    const row = document.createElement("div");
+    row.className = "resource-row";
+    row.innerHTML = `
+      <span class="resource-label">${labels[dir]}</span>
+      <span class="resource-track">
+        <span class="resource-fill" style="width:${pct}%"></span>
+      </span>
+      <span class="resource-value">${value}</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function buildSpecialSlots(playerId) {
+  const container = document.getElementById(`special-slots-${playerId}`);
+  container.innerHTML = "";
+  const slots = state.players[playerId].specialSlots;
+  const ownedLocally = typeof isLocalPlayerAllowed === "function" ? isLocalPlayerAllowed(playerId) : true;
+
+  slots.forEach((slot, idx) => {
+    const el = document.createElement("div");
+    if (slot) {
+      const isActiveDestroyer = !!(
+        state.destroyerMode &&
+        state.destroyerMode.ownerId === playerId &&
+        state.destroyerMode.slotIdx === idx
+      );
+
+      el.className = "special-slot filled";
+      el.textContent = slot.icon;
+      el.title = slot.name + " — " + t("special_activate_hint");
+
+      if (isActiveDestroyer) {
+        el.classList.add("active-destroyer");
+        el.title = slot.name;
+        const badge = document.createElement("span");
+        badge.className = "special-charge-badge";
+        badge.textContent = state.destroyerMode.charges;
+        el.appendChild(badge);
+      } else if (ownedLocally) {
+        el.addEventListener("click", () => {
+          if (typeof activateSpecial === "function") activateSpecial(playerId, idx);
+        });
+      } else {
+        el.classList.add("locked-slot");
+      }
+    } else {
+      el.className = "special-slot empty";
+      el.textContent = "X";
+    }
+    container.appendChild(el);
+  });
+}
+
+function buildStatusArea(playerId) {
+  const container = document.getElementById(`status-area-${playerId}`);
+  container.innerHTML = "";
+  const effects = [];
+
+  // Zeitstopp wirkt global auf die Spielwelt (beide Spieler betroffen)
+  if (typeof world !== "undefined" && world.frost.active) {
+    effects.push({
+      name: t("status_effect_frozen"),
+      pct: Math.max(0, (world.frost.timerMs / world.frost.totalMs) * 100)
+    });
+  }
+
+  // Checkpoint ist pro Spieler individuell und dauerhaft (kein Ablauf)
+  if (typeof playerCheckpoints !== "undefined") {
+    const cp = playerCheckpoints[playerId];
+    if (cp && cp.active) {
+      effects.push({
+        name: t("status_effect_checkpoint"),
+        pct: 100
+      });
+    }
+  }
+
+  if (effects.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "status-empty";
+    empty.textContent = "—";
+    container.appendChild(empty);
+    return;
+  }
+
+  effects.forEach(effect => {
+    const el = document.createElement("div");
+    el.className = "status-effect";
+    el.innerHTML = `
+      <div class="status-effect-name">${effect.name}</div>
+      <div class="status-timer-track">
+        <div class="status-timer-fill" style="width:${effect.pct}%"></div>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+function updateAllStatusAreas() {
+  buildStatusArea("p1");
+  buildStatusArea("p2");
+}
+
+function updateDpad(playerId) {
+  const res = state.players[playerId].resources;
+  const dpad = document.getElementById(`dpad-${playerId}`);
+  const controllable = typeof isLocalPlayerAllowed === "function" ? isLocalPlayerAllowed(playerId) : true;
+  CONFIG.DIRECTIONS.forEach(dir => {
+    const btn = dpad.querySelector(`.dpad-btn.${dir}`);
+    if (res[dir] <= 0 || !controllable) {
+      btn.classList.add("disabled");
+    } else {
+      btn.classList.remove("disabled");
+    }
+  });
+}
+
+function renderPlayerPanel(playerId) {
+  buildMatch3Grid(playerId);
+  buildResourceBars(playerId);
+  buildSpecialSlots(playerId);
+  buildStatusArea(playerId);
+  updateDpad(playerId);
+}
+
+function renderAll() {
+  applyI18n();
+  renderPlayerPanel("p1");
+  renderPlayerPanel("p2");
+}
+
+/* =============================================================
+   D-PAD INTERACTION
+   Ausgegraute Pfeile lösen keine Bewegung aus & verbrauchen kein
+   Guthaben (edge case: "Ausgegrautes Steuerkreuz"). Zusätzlich in
+   Phase 4: KI-/Remote-gesteuerte Spieler ignorieren lokale Eingaben.
+   ============================================================= */
+/* Führt die eigentliche Richtungsbewegung aus — OHNE Zugriffssperre.
+   Wird sowohl von der UI-gesperrten handleDirectionInput() als auch direkt
+   von der KI (aiAttemptMove) verwendet, damit die KI ihren eigenen Frosch
+   bewegen darf, auch wenn isLocalPlayerAllowed() für sie "false" liefert. */
+/* Reine VISUELLE Vorhersage für den Client: Der eigene Frosch bewegt sich
+   sofort, ohne auf die Antwort des Hosts zu warten. Der Host bleibt die
+   einzige autoritative Instanz und korrigiert bei Bedarf (z. B. Tod). */
+function predictLocalMove(playerId, direction) {
+  if (!state.started || state.gameOver) return;
+  if (state.players[playerId].resources[direction] <= 0) return;
+  const frog = frogs[playerId];
+  const target = computeTargetCell(frog, direction);
+  if (!target || isCellBlockedByOtherFrog(playerId, target.row, target.col)) return;
+  frog.row = target.row;
+  frog.col = target.col;
+  frog.squash = 1;
+  sfxJump();
+}
+
+function performDirectionMove(playerId, direction) {
+  if (typeof isOnlineGuest === "function" && isOnlineGuest()) {
+    state.cmdSeq += 1;
+    state.lastCmdTime = performance.now();
+    sendPeerCommand({ type: "cmd_move", playerId, direction, seq: state.cmdSeq });
+    predictLocalMove(playerId, direction);
+    return;
+  }
+
+  const res = state.players[playerId].resources;
+  if (res[direction] <= 0) {
+    return; // gesperrt, kein Effekt
+  }
+
+  // Zwei Frösche dürfen niemals dasselbe Feld belegen — ein blockierter
+  // Zug verbraucht kein Guthaben, ähnlich einer Wand.
+  const frog = frogs[playerId];
+  const target = typeof computeTargetCell === "function" ? computeTargetCell(frog, direction) : null;
+  if (target && typeof isCellBlockedByOtherFrog === "function" && isCellBlockedByOtherFrog(playerId, target.row, target.col)) {
+    return;
+  }
+
+  res[direction] -= 1;
+  buildResourceBars(playerId);
+  updateDpad(playerId);
+  // Phase 2: tatsächliche Frosch-Bewegung auf dem Canvas-Spielfeld.
+  if (typeof moveFrog === "function") {
+    moveFrog(playerId, direction);
+  }
+}
+
+function handleDirectionInput(playerId, direction) {
+  if (typeof isLocalPlayerAllowed === "function" && !isLocalPlayerAllowed(playerId)) {
+    return;
+  }
+  performDirectionMove(playerId, direction);
+  if (isOnlineHost()) broadcastFullState(); // Host-Bewegung sofort zum Client
+}
+
+document.querySelectorAll(".dpad-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const player = btn.dataset.player;
+    const dir = btn.dataset.dir;
+    handleDirectionInput(player, dir);
+  });
+});
+
+/* =============================================================
+   MODAL LOGIC
+   ============================================================= */
+const modalOverlay = document.getElementById("modal-overlay");
+document.getElementById("settings-btn").addEventListener("click", () => {
+  modalOverlay.classList.add("open");
+});
+document.getElementById("modal-close").addEventListener("click", () => {
+  modalOverlay.classList.remove("open");
+});
+modalOverlay.addEventListener("click", (e) => {
+  if (e.target === modalOverlay) modalOverlay.classList.remove("open");
+});
+
+/* Mute Toggle */
+const muteBtn = document.getElementById("mute-btn");
+muteBtn.addEventListener("click", () => {
+  state.muted = !state.muted;
+  muteBtn.classList.toggle("muted", state.muted);
+  muteBtn.classList.toggle("active", !state.muted);
+  muteBtn.textContent = state.muted ? t("audio_off") : t("audio_on");
+  if (typeof updateMasterGain === "function") updateMasterGain();
+});
+
+/* Volume Slider */
+document.getElementById("volume-slider").addEventListener("input", (e) => {
+  state.volume = Number(e.target.value);
+  if (typeof updateMasterGain === "function") updateMasterGain();
+});
+
+/* Sprachumschaltung */
+document.getElementById("lang-de").addEventListener("click", () => setLang("de"));
+document.getElementById("lang-en").addEventListener("click", () => setLang("en"));
+
+function setLang(lang) {
+  state.lang = lang;
+  document.getElementById("lang-de").classList.toggle("active", lang === "de");
+  document.getElementById("lang-en").classList.toggle("active", lang === "en");
+  renderAll();
+}
+
+/* =============================================================
+   TASTATUR-LISTENER
+   P1: WASD | P2: Pfeiltasten
+   ============================================================= */
+const KEY_MAP = {
+  // Spieler 1 - WASD
+  "w": { player: "p1", dir: "up" },
+  "a": { player: "p1", dir: "left" },
+  "s": { player: "p1", dir: "down" },
+  "d": { player: "p1", dir: "right" },
+  // Spieler 2 - Pfeiltasten
+  "ArrowUp": { player: "p2", dir: "up" },
+  "ArrowLeft": { player: "p2", dir: "left" },
+  "ArrowDown": { player: "p2", dir: "down" },
+  "ArrowRight": { player: "p2", dir: "right" }
+};
+
+/* Cheat-Code Erkennung: A-M-I-G-A */
+const CHEAT_SEQUENCE = ["a", "m", "i", "g", "a"];
+let cheatBuffer = [];
+
+document.addEventListener("keydown", (e) => {
+  // Bewegungssteuerung
+  const mapping = KEY_MAP[e.key];
+  if (mapping) {
+    handleDirectionInput(mapping.player, mapping.dir);
+  }
+
+  // Cheat-Code Puffer (case-insensitive, ignoriert bei offenem Modal-Input)
+  const activeTag = document.activeElement.tagName;
+  if (activeTag !== "INPUT") {
+    const key = e.key.toLowerCase();
+    cheatBuffer.push(key);
+    if (cheatBuffer.length > CHEAT_SEQUENCE.length) {
+      cheatBuffer.shift();
+    }
+    if (cheatBuffer.join("") === CHEAT_SEQUENCE.join("")) {
+      triggerCheat();
+      cheatBuffer = [];
+    }
+  }
+});
+
+function triggerCheat() {
+  document.body.classList.add("cheat-active");
+  document.getElementById("match-status").textContent = "★ AMIGA CHEAT ACTIVATED ★";
+  setTimeout(() => {
+    document.body.classList.remove("cheat-active");
+  }, 1300);
+}
+
+/* =============================================================
+   PHASE 2 — AMIGA PIXEL-ART CANVAS ENGINE, SEEROSEN & WEB AUDIO
+   ============================================================= */
+
+/* ---------- Canvas-Grundlagen ---------- */
+const canvas = document.getElementById("game-canvas");
+const ctx = canvas.getContext("2d");
+const CELL = 40;
+const COLS = canvas.width / CELL;   // 12
+const ROWS = canvas.height / CELL;  // 14
+
+/* Zeilentypen des Frogger-Feldes, von oben (Ziel) nach unten (Start).
+   Entspricht (von unten gelesen): 2x Rasen-Start, 3 Autos, 3 Autos + 1 Bus,
+   1x Grünstreifen, 2 Bus, 3 Bus + 1 Auto, 2x Grünstreifen,
+   Baumstämme (2-3 lang), Baumstämme (1-3 lang), Zielhecke (5 Lücken). */
+const FIELD_LAYOUT = [
+  "hedge",   // 0  Zielhecke (Anzahl Lücken hängt von der Spieldauer ab, siehe randomizeHedgeGoals())
+  "log",     // 1  Baumstämme, 1-3 Felder lang
+  "log",     // 2  Baumstämme, 2-3 Felder lang
+  "grass",   // 3  Grünstreifen
+  "grass",   // 4  Grünstreifen
+  "road",    // 5  3 Bus + 1 Auto
+  "road",    // 6  2 Bus
+  "grass",   // 7  Grünstreifen
+  "road",    // 8  3 Autos + 1 Bus
+  "road",    // 9  3 Autos
+  "grass",   // 10 Rasen-Start
+  "grass"    // 11 Rasen-Start
+];
+
+/* Begehbare Lücken in der Zielhecke — alle anderen Spalten sind
+   undurchdringliches Dickicht (blockiert die Bewegung wie eine Wand).
+   Wird zu Rundenbeginn neu zufällig verteilt, siehe randomizeHedgeGoals(). */
+let HEDGE_GOAL_COLS = [];
+
+/* Anzahl der Ziel-Lücken = (Spieldauer × 2 Spieler) - 1.
+   Beispiel: 3 Frösche zum Sieg, 2 Spieler = 6 Frösche => 5 Zielplätze.
+   Das entspricht exakt der maximal möglichen Anzahl an Punktereignissen in
+   einem "Best-of"-Match zwischen 2 Spielern (2×Zielrunden-1) — die Felder
+   reichen also selbst im theoretischen Extremfall immer exakt aus. */
+let usedGoalCols = new Set(); // bereits verbrauchte Zielfelder (passen nur 1 Frosch)
+
+function randomizeHedgeGoals() {
+  const totalFrogs = state.matchConfig.targetWins * 2;
+  const goalCount = Math.max(1, Math.min(COLS, totalFrogs - 1));
+
+  const allCols = [];
+  for (let c = 0; c < COLS; c++) allCols.push(c);
+  for (let i = allCols.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = allCols[i]; allCols[i] = allCols[j]; allCols[j] = tmp;
+  }
+  HEDGE_GOAL_COLS = allCols.slice(0, goalCount).sort((a, b) => a - b);
+  usedGoalCols = new Set(); // zu Rundenbeginn sind alle Zielfelder wieder frei
+}
+
+/* ---------- Welt-/Objektzustand ---------- */
+const world = {
+  tick: 0,
+  elapsedMs: 0,
+  cars: [],
+  logs: [],
+  lilyPads: [],
+  particles: [],
+  shake: { framesLeft: 0, x: 0, y: 0 },
+  frost: { active: false, timerMs: 0, totalMs: 5000 }
+};
+
+/* Checkpoints sind pro Spieler individuell, dauerhaft (kein Ablauf) und nur
+   zeilenbasiert — die Fahne steht am Seitenrand der Grünzeile, auf der der
+   Spieler die Fähigkeit aktiviert hat. */
+const playerCheckpoints = {
+  p1: { active: false, row: 0 },
+  p2: { active: false, row: 0 }
+};
+
+const frogs = {
+  p1: { col: 3, row: 11, color: "green", squash: 0, spawnTime: 0 },
+  p2: { col: 8, row: 11, color: "red",   squash: 0, spawnTime: 0 }
+};
+
+/* ---------- Fahrzeuge: pro Spur individuell zusammengesetzt (Auto = 1 Feld, Bus = 2 Felder) ---------- */
+const CAR_COLORS = ["#ff5555", "#ffd93d", "#4ecdc4", "#ff8c42", "#ff477e"];
+
+/* Exakte Fahrzeug-Zusammensetzung je Straßen-Zeile (Länge je Fahrzeug in Feldern) */
+const ROAD_LANE_VEHICLES = {
+  9: [1, 1, 1],        // 3 Autos
+  8: [1, 1, 1, 2],      // 3 Autos + 1 Bus
+  6: [2, 2],            // 2 Bus
+  5: [2, 2, 2, 1]       // 3 Bus + 1 Auto
+};
+
+function initCars() {
+  world.cars = [];
+  let colorIdx = 0;
+  FIELD_LAYOUT.forEach((type, rowIndex) => {
+    if (type !== "road") return;
+    const dir = rowIndex % 2 === 0 ? 1 : -1;
+    const lengths = ROAD_LANE_VEHICLES[rowIndex] || [1, 1];
+    const vehicleCount = lengths.length;
+    let col = Math.floor(Math.random() * 2);
+    lengths.forEach(length => {
+      world.cars.push({
+        row: rowIndex,
+        col,
+        prevCol: col,
+        dir,
+        length,
+        color: CAR_COLORS[colorIdx % CAR_COLORS.length]
+      });
+      colorIdx++;
+      // Gleichmäßiger Abstand, damit auch bei gemischten Fahrzeuglängen ein
+      // durchgehendes, faires Zeitfenster für eine sichere Überquerung bleibt.
+      col += length + Math.max(1, Math.floor(COLS / vehicleCount) - length);
+    });
+  });
+}
+
+/* ---------- Holzbalken: Länge je Spur unterschiedlich, fließen entgegen der Fahrzeuge ---------- */
+function logCoversCol(log, col) {
+  for (let l = 0; l < log.length; l++) {
+    const occ = ((log.col - l * log.dir) % COLS + COLS) % COLS;
+    if (occ === col) return true;
+  }
+  return false;
+}
+
+function logsOccupying(row, col) {
+  return world.logs.some(log => log.row === row && logCoversCol(log, col));
+}
+
+function predictLogsOccupying(row, col, ticksAhead) {
+  return world.logs.some(log => {
+    if (log.row !== row) return false;
+    const futureCol = ((log.col + log.dir * ticksAhead) % COLS + COLS) % COLS;
+    for (let l = 0; l < log.length; l++) {
+      const occ = ((futureCol - l * log.dir) % COLS + COLS) % COLS;
+      if (occ === col) return true;
+    }
+    return false;
+  });
+}
+
+/* Längenbereich je Balken-Zeile: Zeile 1 (näher an der Hecke) 1-3 Felder,
+   Zeile 2 (näher am Start) 2-3 Felder. */
+const LOG_LANE_LENGTH_RANGE = {
+  1: { min: 1, max: 3 },
+  2: { min: 2, max: 3 }
+};
+
+function initLogs() {
+  world.logs = [];
+  const logRows = FIELD_LAYOUT
+    .map((t, i) => (t === "log" ? i : null))
+    .filter(v => v !== null);
+
+  logRows.forEach((row, idx) => {
+    // WICHTIG: Benachbarte Balken-Zeilen dürfen NICHT dieselbe Richtung UND
+    // Geschwindigkeit haben — sonst bleibt die relative Phase zwischen den
+    // Zeilen für immer eingefroren (bewegen sich beide exakt synchron,
+    // ändert sich nie, welche Spalten zueinander "sicher" ausgerichtet
+    // sind). Eine einmal ungünstige Spalten-Ausrichtung wäre dann für
+    // IMMER unpassierbar, egal wie lange gewartet wird. Deshalb wechselt
+    // die Fließrichtung zeilenweise (wie bei den Fahrzeugen).
+    const dir = idx % 2 === 0 ? -1 : 1;
+    const range = LOG_LANE_LENGTH_RANGE[row] || { min: 1, max: 3 };
+    let col = Math.floor(Math.random() * 3);
+    while (col < COLS) {
+      const length = range.min + Math.floor(Math.random() * (range.max - range.min + 1));
+      world.logs.push({ row, col, prevCol: col, dir, length });
+      col += length + 1 + Math.floor(Math.random() * 2); // Lücke zwischen Balken
+    }
+  });
+}
+
+/* ---------- Seerosen: 3-Phasen-Zyklus (Knospe -> Blüte -> Welkend), alle begehbar ---------- */
+const LILY_PHASES = ["bud", "bloom", "wilt"];
+const LILY_PHASE_TICKS = { bud: 1, bloom: 2, wilt: 1 };
+
+/* Nur eine einzelne Seerosen-Zeile; Position jeder Seerose ist zufällig
+   (nicht jede Spalte ist belegt — echte Lücken bleiben gefährlich). */
+function initLilyPads() {
+  world.lilyPads = [];
+  const lilyRow = FIELD_LAYOUT.indexOf("lily");
+  if (lilyRow === -1) return;
+
+  for (let col = 0; col < COLS; col++) {
+    if (Math.random() < 0.75) {
+      world.lilyPads.push({
+        row: lilyRow,
+        col,
+        phase: LILY_PHASES[Math.floor(Math.random() * LILY_PHASES.length)],
+        ticksInPhase: 0
+      });
+    }
+  }
+}
+
+function advanceLilyPads() {
+  world.lilyPads.forEach(pad => {
+    pad.ticksInPhase++;
+    const limit = LILY_PHASE_TICKS[pad.phase];
+    if (pad.ticksInPhase >= limit) {
+      pad.ticksInPhase = 0;
+      const idx = LILY_PHASES.indexOf(pad.phase);
+      pad.phase = LILY_PHASES[(idx + 1) % LILY_PHASES.length];
+      if (pad.phase === "bud") {
+        const drift = Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        pad.col = Math.max(0, Math.min(COLS - 1, pad.col + drift));
+      }
+    }
+  });
+}
+
+/* Alle 3 Phasen (Knospe, Blüte, Welkend) sind begehbar — nur echte
+   Lücken zwischen den Seerosen sind unsicher. */
+function isLilySafe(row, col) {
+  return world.lilyPads.some(p => p.row === row && p.col === col);
+}
+
+/* ---------- Web Audio API — Sound-Synthesizer ---------- */
+let audioCtx = null;
+let masterGain = null;
+
+function ensureAudio() {
+  if (audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AC();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = state.muted ? 0 : state.volume / 100;
+  masterGain.connect(audioCtx.destination);
+}
+
+function updateMasterGain() {
+  if (!masterGain) return;
+  masterGain.gain.setTargetAtTime(state.muted ? 0 : state.volume / 100, audioCtx.currentTime, 0.02);
+}
+
+function playTone({ freq, duration = 0.12, type = "square", startGain = 0.35, glideTo = null, delay = 0 }) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  const t0 = audioCtx.currentTime + delay;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t0 + duration);
+  gain.gain.setValueAtTime(startGain, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+
+/* Sprung */
+function sfxJump() {
+  ensureAudio();
+  playTone({ freq: 300, glideTo: 480, duration: 0.09, type: "square", startGain: 0.25 });
+}
+
+/* Pling mit ansteigender Tonhöhe bei Combos */
+function sfxPling(comboCount = 1) {
+  ensureAudio();
+  const baseFreq = 520;
+  for (let i = 0; i < Math.min(comboCount, 8); i++) {
+    playTone({
+      freq: baseFreq + i * 90,
+      duration: 0.1,
+      type: "triangle",
+      startGain: 0.3,
+      delay: i * 0.07
+    });
+  }
+}
+
+/* Auto-Kollision */
+function sfxCarHit() {
+  ensureAudio();
+  playTone({ freq: 140, glideTo: 40, duration: 0.28, type: "sawtooth", startGain: 0.4 });
+  playTone({ freq: 90, duration: 0.2, type: "square", startGain: 0.25, delay: 0.02 });
+}
+
+/* Wasser-Platsch */
+function sfxWaterSplash() {
+  ensureAudio();
+  playTone({ freq: 220, glideTo: 90, duration: 0.22, type: "sine", startGain: 0.3 });
+  playTone({ freq: 600, glideTo: 200, duration: 0.15, type: "triangle", startGain: 0.15, delay: 0.02 });
+}
+
+/* Fanfare beim Erreichen der Zielhecke */
+function sfxFanfare() {
+  ensureAudio();
+  const notes = [523, 659, 784, 1046];
+  notes.forEach((f, i) => {
+    playTone({ freq: f, duration: 0.22, type: "square", startGain: 0.3, delay: i * 0.14 });
+  });
+}
+
+/* ---------- Partikel-System ---------- */
+function spawnParticles(px, py, color, count = 14) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.2 + Math.random() * 2.4;
+    world.particles.push({
+      x: px, y: py,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      decay: 0.03 + Math.random() * 0.02,
+      size: 2 + Math.random() * 2,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = world.particles.length - 1; i >= 0; i--) {
+    const p = world.particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.08;
+    p.life -= p.decay;
+    if (p.life <= 0) world.particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  world.particles.forEach(p => {
+    ctx.globalAlpha = Math.max(p.life, 0);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- Screen-Shake (2–3 Frames) ---------- */
+function triggerShake() {
+  world.shake.framesLeft = 3;
+}
+
+function updateShake() {
+  if (world.shake.framesLeft > 0) {
+    world.shake.x = (Math.random() - 0.5) * 8;
+    world.shake.y = (Math.random() - 0.5) * 8;
+    world.shake.framesLeft--;
+  } else {
+    world.shake.x = 0;
+    world.shake.y = 0;
+  }
+}
+
+/* ---------- Kollisions- & Sicherheitslogik ----------
+   Einheitliche Regel: JEDE Überlappung zwischen dem Frosch und einer
+   Gefahren-Grafik (Auto, LKW, offenes Wasser) führt zum Tod. Einzige
+   Ausnahme: zwei Frösche dürfen niemals dasselbe Feld überlappen — das
+   wird bereits VOR der Bewegung durch isCellBlockedByOtherFrog() verhindert
+   (siehe unten), nicht über diese Kollisionsprüfung. */
+function carsOccupying(row, col) {
+  return world.cars.some(car => {
+    if (car.row !== row) return false;
+    for (let l = 0; l < car.length; l++) {
+      const occ = ((car.col - l * car.dir) % COLS + COLS) % COLS;
+      if (occ === col) return true;
+    }
+    return false;
+  });
+}
+
+/* Zentrale, einheitliche Gefahrenprüfung für eine einzelne Zelle.
+   Liefert true, sobald dort eine tödliche Grafik-Überlappung vorliegt. */
+/* Berechnet, welcher Anteil (0-1) der Frosch-Zelle GERADE JETZT visuell von
+   Holzbalken bedeckt ist — anhand derselben interpolierten (animierten)
+   Positionen, die auch drawLogs() zum Zeichnen verwendet. Das behebt die
+   "Kanten zwischen zwei Balken"-Problematik: springt der Frosch exakt auf
+   den Übergang zwischen zwei benachbarten Balken-Objekten, zählt das nicht
+   mehr automatisch als Tod, solange in Summe mehr als 50% der Zelle von
+   (einem oder mehreren) Balken bedeckt sind. */
+function getLogCoverageFraction(row, col) {
+  const alpha = Math.min(world.elapsedMs / CONFIG.WORLD_TICK_MS, 1);
+  const frogLeft = col * CELL;
+  const frogRight = frogLeft + CELL;
+  const boardWidth = COLS * CELL;
+  let covered = 0;
+
+  world.logs.forEach(log => {
+    if (log.row !== row) return;
+    let interpCol = log.prevCol + (log.col - log.prevCol) * alpha;
+    if (Math.abs(log.col - log.prevCol) > 1) {
+      interpCol = log.dir > 0 ? log.prevCol + alpha : log.prevCol - alpha;
+    }
+    const logWidth = CELL * log.length;
+    const logLeftBase = interpCol * CELL;
+
+    // Auch die Wrap-Kopien am linken/rechten Spielfeldrand berücksichtigen
+    // (derselbe Balken kann am Rand "doppelt" sichtbar sein).
+    [logLeftBase, logLeftBase - boardWidth, logLeftBase + boardWidth].forEach(left => {
+      const right = left + logWidth;
+      const overlapLeft = Math.max(left, frogLeft);
+      const overlapRight = Math.min(right, frogRight);
+      if (overlapRight > overlapLeft) covered += (overlapRight - overlapLeft);
+    });
+  });
+
+  return Math.min(1, covered / CELL);
+}
+
+function isHazardAt(row, col) {
+  const type = FIELD_LAYOUT[row];
+  if (type === "road") {
+    return carsOccupying(row, col); // Überlappung mit Auto/Bus
+  }
+  if (type === "log") {
+    // Ground-Truth zuerst: deckt ein Balken die Zelle logisch eindeutig ab,
+    // ist es sicher — unabhängig vom Animationsfortschritt (wichtig für
+    // KI-Entscheidungen, die exakt am Tick-Beginn getroffen werden).
+    if (logsOccupying(row, col)) return false;
+    // Sicherheitsnetz 1: springt der Frosch exakt auf die Kante zwischen
+    // zwei Balken-Objekten oder mitten im Übergang, zählt es trotzdem als
+    // sicher, sobald mehr als 50% der Zielzelle GERADE JETZT visuell von
+    // (einem oder mehreren) Balken bedeckt sind.
+    if (getLogCoverageFraction(row, col) > 0.5) return false;
+    // Sicherheitsnetz 2: erreicht ein Balken diese Zelle bereits im NÄCHSTEN
+    // Welt-Tick (er bewegt sich gerade dorthin), gilt der Sprung ebenfalls
+    // als sicher — entschärft knappe Zeitpunkte beim Laufen entlang der
+    // Fahrtrichtung eines Balkens.
+    if (predictLogsOccupying(row, col, 1)) return false;
+    return true; // echte Lücke
+  }
+  if (type === "lily") {
+    return !isLilySafe(row, col); // keine Seerose an dieser Stelle = Lücke
+  }
+  return false; // Wiese/Hecke: nie gefährlich
+}
+
+/* Zwei Frösche dürfen niemals dasselbe Feld belegen — das ist die einzige
+   Ausnahme von der Kollisionsregel und wird als Bewegungssperre (nicht als
+   Tod) behandelt, siehe performDirectionMove(). */
+function isCellBlockedByOtherFrog(playerId, row, col) {
+  const otherId = playerId === "p1" ? "p2" : "p1";
+  const other = frogs[otherId];
+  return other.row === row && other.col === col;
+}
+
+/* Edge Case "Checkpoint-Respawn": Ist für den Spieler ein Checkpoint aktiv,
+   respawnt der Frosch in dieser Zeile — die Spalte bleibt unverändert.
+   Ohne aktiven Checkpoint geht es IMMER zurück zur Startzeile ("Zeile 0"
+   aus Spielersicht, intern die unterste Zeile des Feldes). */
+function respawnAtSafeRow(frog, playerId) {
+  const cp = playerCheckpoints[playerId];
+  if (cp && cp.active) {
+    frog.row = cp.row;
+  } else {
+    frog.row = ROWS - 1; // Startzeile
+  }
+  frog.spawnTime = performance.now(); // Zeitmessung für "schnellste Frösche" neu starten
+}
+
+/* Gemeinsame Todes-Auslösung (Partikel, Screen-Shake, Sound, Respawn) —
+   wird sowohl von der diskreten Tick-Kollision (handleCollisionCheck) als
+   auch von der kontinuierlichen Pixel-Überlappungsprüfung (siehe unten)
+   verwendet, damit jede Art von Grafik-Überschneidung konsistent zum
+   gleichen Ergebnis führt. */
+function triggerFrogDeath(frog, playerId, isWater) {
+  const px = frog.col * CELL + CELL / 2;
+  const py = frog.row * CELL + CELL / 2;
+  spawnParticles(px, py, isWater ? "#4ecdc4" : "#ff8c42", isWater ? 14 : 16);
+  triggerShake();
+  if (isWater) sfxWaterSplash(); else sfxCarHit();
+  respawnAtSafeRow(frog, playerId);
+}
+
+function handleCollisionCheck(frog, playerId) {
+  const type = FIELD_LAYOUT[frog.row];
+
+  // Edge Case "Kollision": Partikel-Explosion, Screen-Shake, Reset —
+  // das Match-3-Guthaben bleibt dabei unangetastet. Jede Grafik-Überlappung
+  // (Auto/LKW/offenes Wasser) läuft jetzt über dieselbe zentrale Prüfung.
+  if (isHazardAt(frog.row, frog.col)) {
+    triggerFrogDeath(frog, playerId, type === "log" || type === "lily");
+    return;
+  }
+
+  if (type === "hedge" && typeof declareWinner === "function") {
+    usedGoalCols.add(frog.col); // dieses Zielfeld ist ab jetzt für alle belegt
+    // Zeit für die "5 schnellsten Frösche"-Bestenliste erfassen
+    if (typeof recordFrogTime === "function") {
+      const elapsedMs = performance.now() - frog.spawnTime;
+      const recordTs = new Date().toISOString();
+      recordFrogTime(playerId, elapsedMs, recordTs);
+      // Der Client misst selbst nichts — der Host meldet die Zeit für dessen Bestenliste.
+      if (isOnlineHost() && peerConn && peerConn.open) {
+        peerConn.send({ type: "record", playerId, time: elapsedMs, ts: recordTs });
+      }
+    }
+    declareWinner(playerId);
+  }
+}
+
+/* ---------- Welt-Tick (2 Sekunden Taktzeit für Objektbewegungen) ---------- */
+function worldStep() {
+  world.tick++;
+
+  // Fahrzeuge (Autos & LKW) bewegen
+  world.cars.forEach(car => {
+    car.prevCol = car.col;
+    car.col = ((car.col + car.dir) % COLS + COLS) % COLS;
+  });
+
+  // Frösche, die gerade auf einem Holzbalken stehen, werden mitgenommen —
+  // die Prüfung erfolgt anhand der alten Balken-Position, bevor sich die
+  // Balken selbst weiterbewegen. Die visuelle Synchronisation läuft separat
+  // und zustandslos über getFrogRideOffset() beim Zeichnen (siehe drawFrog).
+  ["p1", "p2"].forEach(playerId => {
+    const frog = frogs[playerId];
+    if (FIELD_LAYOUT[frog.row] === "log") {
+      const carryingLog = world.logs.find(log => log.row === frog.row && logCoversCol(log, frog.col));
+      if (carryingLog) {
+        frog.col = ((frog.col + carryingLog.dir) % COLS + COLS) % COLS;
+      }
+    }
+  });
+
+  // Holzbalken bewegen (Flussrichtung entgegen der Fahrzeuge)
+  world.logs.forEach(log => {
+    log.prevCol = log.col;
+    log.col = ((log.col + log.dir) % COLS + COLS) % COLS;
+  });
+
+  advanceLilyPads();
+  if (typeof runAIForTick === "function") runAIForTick("p2");
+  if (typeof broadcastFullState === "function") broadcastFullState();
+}
+
+/* ---------- Frost-Overlay (Zeitstopp) ---------- */
+function updateFrost(dtMs) {
+  if (!world.frost.active) return;
+  world.frost.timerMs -= dtMs;
+  if (world.frost.timerMs <= 0) {
+    world.frost.active = false;
+    world.frost.timerMs = 0;
+  }
+}
+
+function drawFrostOverlay() {
+  if (!world.frost.active) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(150, 210, 255, 0.22)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "rgba(220, 245, 255, 0.5)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 26; i++) {
+    const x = (i * 53) % canvas.width;
+    const y = (i * 97) % canvas.height;
+    ctx.beginPath();
+    ctx.moveTo(x - 5, y);
+    ctx.lineTo(x + 5, y);
+    ctx.moveTo(x, y - 5);
+    ctx.lineTo(x, y + 5);
+    ctx.stroke();
+  }
+  const pct = world.frost.timerMs / world.frost.totalMs;
+  ctx.fillStyle = "rgba(150,210,255,0.9)";
+  ctx.fillRect(canvas.width / 2 - 60, 8, 120 * pct, 6);
+  ctx.strokeStyle = "#eef0ff";
+  ctx.strokeRect(canvas.width / 2 - 60, 8, 120, 6);
+  ctx.restore();
+}
+
+/* ---------- Zeichenfunktionen ---------- */
+function drawField() {
+  FIELD_LAYOUT.forEach((type, row) => {
+    let color = "#3a5f3a"; // Grünstreifen / Start
+    if (type === "road") color = "#2a2a38";
+    if (type === "log") color = "#0f3a52";
+    if (type === "lily") color = "#134a3e";
+    if (type === "hedge") color = "#1e5c2e";
+    ctx.fillStyle = color;
+    ctx.fillRect(0, row * CELL, canvas.width, CELL);
+  });
+
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.setLineDash([6, 6]);
+  FIELD_LAYOUT.forEach((type, row) => {
+    if (type !== "road") return;
+    ctx.beginPath();
+    ctx.moveTo(0, row * CELL + CELL / 2);
+    ctx.lineTo(canvas.width, row * CELL + CELL / 2);
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // Zielhecke: nur die (zufällig verteilten, noch freien) Lücken sind
+  // begehbar. Der Rest ist dichtes Gebüsch — bereits verbrauchte Zielfelder
+  // (schon von einem Frosch belegt) werden zugewachsen dargestellt, da sie
+  // wie normales Gebüsch blockieren, aber ihre frühere Position erkennbar
+  // bleibt.
+  for (let c = 0; c < COLS; c++) {
+    const isGoalGap = HEDGE_GOAL_COLS.includes(c);
+    const isUsed = usedGoalCols.has(c);
+
+    if (isGoalGap && !isUsed) {
+      ctx.fillStyle = "#0d2e16";
+      ctx.fillRect(c * CELL + 4, 4, CELL - 8, CELL - 8);
+      ctx.strokeStyle = "#3fae63";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(c * CELL + 4, 4, CELL - 8, CELL - 8);
+    } else if (isGoalGap && isUsed) {
+      // Verbrauchtes Zielfeld: zugewachsen, aber mit gestricheltem Rand
+      // noch als ehemalige Lücke erkennbar.
+      ctx.fillStyle = "#164a22";
+      ctx.beginPath();
+      ctx.arc(c * CELL + CELL / 2, CELL / 2, 13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3a2a1a";
+      ctx.beginPath();
+      ctx.arc(c * CELL + CELL / 2 - 6, CELL / 2 - 5, 8, 0, Math.PI * 2);
+      ctx.arc(c * CELL + CELL / 2 + 7, CELL / 2 + 4, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,85,85,0.6)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(c * CELL + 6, 6, CELL - 12, CELL - 12);
+      ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = "#164a22";
+      ctx.beginPath();
+      ctx.arc(c * CELL + CELL / 2, CELL / 2, 13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1e5c2e";
+      ctx.beginPath();
+      ctx.arc(c * CELL + CELL / 2 - 6, CELL / 2 - 5, 8, 0, Math.PI * 2);
+      ctx.arc(c * CELL + CELL / 2 + 7, CELL / 2 + 4, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawLilyPads() {
+  world.lilyPads.forEach(pad => {
+    const px = pad.col * CELL + CELL / 2;
+    const py = pad.row * CELL + CELL / 2;
+
+    if (pad.phase === "bud") {
+      ctx.fillStyle = "#2f7d4a";
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (pad.phase === "bloom") {
+      ctx.fillStyle = "#3fae63";
+      ctx.beginPath();
+      ctx.arc(px, py, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffd93d";
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#1e5c2e";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else if (pad.phase === "wilt") {
+      ctx.fillStyle = "#7a6a3d";
+      ctx.beginPath();
+      ctx.arc(px, py, 11, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+}
+
+function drawCars(alpha) {
+  world.cars.forEach(car => {
+    let interpCol = car.prevCol + (car.col - car.prevCol) * alpha;
+    if (Math.abs(car.col - car.prevCol) > 1) {
+      interpCol = car.dir > 0 ? car.prevCol + alpha : car.prevCol - alpha;
+    }
+    const x = interpCol * CELL;
+    const y = car.row * CELL;
+    const w = CELL * car.length - 4;
+
+    ctx.fillStyle = car.color;
+    ctx.fillRect(x + 2, y + 8, w, CELL - 16);
+    ctx.fillStyle = "#1a1a2e";
+    ctx.fillRect(x + 2, y + 8, w, 4);
+    ctx.fillStyle = "#111";
+    ctx.fillRect(x + 4, y + CELL - 10, 6, 6);
+    ctx.fillRect(x + w - 6, y + CELL - 10, 6, 6);
+    ctx.fillStyle = "#ffd93d";
+    const lightX = car.dir > 0 ? x + w - 2 : x + 2;
+    ctx.fillRect(lightX, y + CELL / 2 - 2, 3, 4);
+  });
+}
+
+function drawLogs(alpha) {
+  world.logs.forEach(log => {
+    let interpCol = log.prevCol + (log.col - log.prevCol) * alpha;
+    if (Math.abs(log.col - log.prevCol) > 1) {
+      interpCol = log.dir > 0 ? log.prevCol + alpha : log.prevCol - alpha;
+    }
+    const x = interpCol * CELL;
+    const y = log.row * CELL;
+    const w = CELL * log.length - 4;
+
+    ctx.fillStyle = "#8b5a2b";
+    ctx.fillRect(x + 2, y + 6, w, CELL - 12);
+    ctx.strokeStyle = "#5a3a1a";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 2, y + 6, w, CELL - 12);
+
+    // Holzmaserung
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.moveTo(x + 5, y + CELL / 2);
+    ctx.lineTo(x + w - 3, y + CELL / 2);
+    ctx.stroke();
+    for (let s = 1; s < log.length; s++) {
+      const sx = x + s * CELL;
+      ctx.beginPath();
+      ctx.arc(sx, y + CELL / 2, 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
+
+  // Echte Lücken zwischen Balken (Ground-Truth: keine Balken-Deckung) klar
+  // als Gefahr markieren — kleine Wellen-Symbole, damit die Balken-Kante
+  // eindeutig erkennbar ist und nicht mit durchgehendem Balken verwechselt
+  // werden kann.
+  const logRows = [...new Set(world.logs.map(l => l.row))];
+  logRows.forEach(row => {
+    for (let c = 0; c < COLS; c++) {
+      if (logsOccupying(row, c)) continue;
+      const cx = c * CELL + CELL / 2;
+      const cy = row * CELL + CELL / 2;
+      ctx.strokeStyle = "rgba(180,225,255,0.55)";
+      ctx.lineWidth = 1.5;
+      [-6, 2].forEach(dy => {
+        ctx.beginPath();
+        ctx.moveTo(cx - 10, cy + dy);
+        ctx.quadraticCurveTo(cx - 5, cy + dy - 4, cx, cy + dy);
+        ctx.quadraticCurveTo(cx + 5, cy + dy + 4, cx + 10, cy + dy);
+        ctx.stroke();
+      });
+    }
+  });
+}
+
+function drawCheckpointFlag() {
+  ["p1", "p2"].forEach(playerId => {
+    const cp = playerCheckpoints[playerId];
+    if (!cp || !cp.active) return;
+    const flagColor = playerId === "p1" ? "#6bcf7f" : "#ff5555";
+    const y = cp.row * CELL + CELL;
+    const isLeft = playerId === "p1";
+    const x = isLeft ? 5 : canvas.width - 5;
+    const dir = isLeft ? 1 : -1; // Fahnentuch zeigt zur Spielfeldmitte
+
+    ctx.strokeStyle = "#c9c9c9";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - CELL * 1.3);
+    ctx.stroke();
+
+    ctx.fillStyle = flagColor;
+    ctx.beginPath();
+    ctx.moveTo(x, y - CELL * 1.3);
+    ctx.lineTo(x + 14 * dir, y - CELL * 1.15);
+    ctx.lineTo(x, y - CELL * 1.0);
+    ctx.closePath();
+    ctx.fill();
+  });
+}
+
+/* Ermittelt live (ohne gespeicherten Zustand), wie weit der Balken unter
+   einem Frosch GERADE JETZT visuell von seiner logischen Ruheposition
+   abweicht (dieselbe Interpolations-/Wrap-Logik wie drawLogs). Dieser
+   kleine Versatz wird direkt auf die Frosch-Position addiert — dadurch
+   "klebt" der Frosch immer exakt am sichtbaren Balken, egal ob er schon
+   länger mitfährt oder gerade erst mitten in dessen Animation gelandet
+   ist (behebt das "Balken rutscht unter dem Frosch weiter"-Problem). */
+function getFrogRideOffset(frog, alpha) {
+  if (FIELD_LAYOUT[frog.row] !== "log") return 0;
+  const ridingLog = world.logs.find(log => log.row === frog.row && logCoversCol(log, frog.col));
+  if (!ridingLog) return 0;
+
+  let interpCol = ridingLog.prevCol + (ridingLog.col - ridingLog.prevCol) * (alpha || 0);
+  if (Math.abs(ridingLog.col - ridingLog.prevCol) > 1) {
+    interpCol = ridingLog.dir > 0 ? ridingLog.prevCol + (alpha || 0) : ridingLog.prevCol - (alpha || 0);
+  }
+  return interpCol - ridingLog.col;
+}
+
+function drawFrog(frog, alpha) {
+  const drawCol = frog.col + getFrogRideOffset(frog, alpha);
+
+  const px = drawCol * CELL + CELL / 2;
+  const py = frog.row * CELL + CELL / 2;
+  const squash = frog.squash;
+  const w = CELL * 0.6 * (1 + squash * 0.25);
+  const h = CELL * 0.55 * (1 - squash * 0.25);
+
+  ctx.fillStyle = frog.color === "green" ? "#6bcf7f" : "#ff5555";
+  ctx.beginPath();
+  ctx.ellipse(px, py, w / 2, h / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#1a1a2e";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = "#1a1a2e";
+  ctx.beginPath();
+  ctx.arc(px - w * 0.18, py - h * 0.28, 2.4, 0, Math.PI * 2);
+  ctx.arc(px + w * 0.18, py - h * 0.28, 2.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (frog.squash > 0) frog.squash = Math.max(0, frog.squash - 0.08);
+}
+
+/* ---------- Frosch-Bewegung (verknüpft mit D-Pad/Tastatur aus Phase 1) ---------- */
+/* Die Zielhecke ist nur an den 5 definierten Lücken passierbar — jede
+   andere Spalte in Zeile 0 blockiert die Bewegung wie eine Wand. */
+function isCellBlockedByHedge(row, col) {
+  if (row !== 0) return false;
+  return !HEDGE_GOAL_COLS.includes(col) || usedGoalCols.has(col);
+}
+
+function moveFrog(playerId, direction) {
+  const frog = frogs[playerId];
+  const prev = { col: frog.col, row: frog.row };
+  let nextRow = frog.row, nextCol = frog.col;
+  if (direction === "up") nextRow = Math.max(0, frog.row - 1);
+  if (direction === "down") nextRow = Math.min(ROWS - 1, frog.row + 1);
+  if (direction === "left") nextCol = Math.max(0, frog.col - 1);
+  if (direction === "right") nextCol = Math.min(COLS - 1, frog.col + 1);
+
+  if (isCellBlockedByHedge(nextRow, nextCol)) return; // dichtes Gebüsch, kein Durchkommen
+
+  frog.row = nextRow;
+  frog.col = nextCol;
+
+  if (prev.col !== frog.col || prev.row !== frog.row) {
+    frog.squash = 1;
+    sfxJump();
+    handleCollisionCheck(frog, playerId);
+  }
+}
+
+/* Kontinuierliche Pixel-Überlappungsprüfung (jeden Frame, nicht nur einmal
+   pro Welt-Tick): Fahrzeuge werden weich zwischen den Zellen interpoliert
+   dargestellt (siehe drawCars), daher reicht eine rein diskrete Prüfung an
+   den Tick-Grenzen nicht aus, um JEDE visuelle Überschneidung zu erfassen —
+   ein Auto kann optisch über eine Frosch-Zelle gleiten, ohne dass genau im
+   Tick-Moment eine Gitter-Übereinstimmung vorlag. Diese Funktion vergleicht
+   die tatsächlich gerenderten (interpolierten) Auto-Rechtecke mit der
+   Frosch-Zelle und löst denselben zentralen Tod aus wie die Tick-Prüfung. */
+function checkContinuousVehicleOverlap(alpha) {
+  ["p1", "p2"].forEach(playerId => {
+    const frog = frogs[playerId];
+    const type = FIELD_LAYOUT[frog.row];
+    if (type !== "road") return;
+
+    const frogLeft = frog.col * CELL;
+    const frogRight = frogLeft + CELL;
+    const boardWidth = COLS * CELL;
+    const overlaps = (a1, a2) => a1 < frogRight && a2 > frogLeft;
+
+    const hit = world.cars.some(car => {
+      if (car.row !== frog.row) return false;
+      let interpCol = car.prevCol + (car.col - car.prevCol) * alpha;
+      if (Math.abs(car.col - car.prevCol) > 1) {
+        interpCol = car.dir > 0 ? car.prevCol + alpha : car.prevCol - alpha;
+      }
+      const carLeft = interpCol * CELL;
+      const carRight = carLeft + CELL * car.length;
+      // Auch die gespiegelten Positionen am Spielfeldrand prüfen, damit ein
+      // Auto, das gerade den Rand über- bzw. unterschreitet, nicht übersehen wird.
+      return (
+        overlaps(carLeft, carRight) ||
+        overlaps(carLeft - boardWidth, carRight - boardWidth) ||
+        overlaps(carLeft + boardWidth, carRight + boardWidth)
+      );
+    });
+
+    if (hit) {
+      triggerFrogDeath(frog, playerId, false);
+    }
+  });
+}
+
+/* ---------- Haupt-Render-Loop ---------- */
+let lastFrameTime = performance.now();
+
+function renderLoop(now) {
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+
+  const isGuest = typeof isOnlineGuest === "function" && isOnlineGuest();
+
+  if (!isGuest) {
+    updateFrost(dt);
+  }
+
+  if (state.started && !world.frost.active && !state.gameOver && !isGuest) {
+    world.elapsedMs += dt;
+    if (world.elapsedMs >= CONFIG.WORLD_TICK_MS) {
+      world.elapsedMs -= CONFIG.WORLD_TICK_MS;
+      worldStep();
+      handleCollisionCheck(frogs.p1, "p1");
+      handleCollisionCheck(frogs.p2, "p2");
+    }
+  } else if (isGuest && state.started) {
+    // NICHT auf 0 umbrechen: Kommt der nächste Host-Tick durch Netzwerk-Jitter
+    // etwas später, würden Autos/Balken sonst kurz auf ihre alte Position
+    // zurückspringen. Stattdessen bleibt die Uhr bei alpha=1 stehen, bis
+    // applyHostState() sie beim nächsten echten Tick neu startet.
+    world.elapsedMs = Math.min(world.elapsedMs + dt, CONFIG.WORLD_TICK_MS);
+  }
+
+  updateParticles();
+  updateShake();
+
+  const alpha = Math.min(world.elapsedMs / CONFIG.WORLD_TICK_MS, 1);
+
+  if (state.started && !world.frost.active && !state.gameOver && !isGuest) {
+    checkContinuousVehicleOverlap(alpha);
+  }
+
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(world.shake.x, world.shake.y);
+
+  drawField();
+  drawLilyPads();
+  drawCars(alpha);
+  drawLogs(alpha);
+  drawCheckpointFlag();
+  drawFrog(frogs.p1, alpha);
+  drawFrog(frogs.p2, alpha);
+  drawParticles();
+  drawFrostOverlay();
+
+  ctx.restore();
+
+  requestAnimationFrame(renderLoop);
+}
+
+/* =============================================================
+   PHASE 3 — MATCH-3-LOGIK, INVENTAR-LIMIT & SPEZIALEFFEKTE
+   ============================================================= */
+
+/* ---------- Piece-Definitionen ---------- */
+const DIRECTION_PIECES = ["up", "down", "left", "right"];
+const SPECIAL_PIECES = ["freeze", "checkpoint", "boost", "destroyer"];
+const PIECE_TYPES = [...DIRECTION_PIECES, ...SPECIAL_PIECES];
+
+/* Richtungssteine sind häufiger als Spezialsteine (Gewichtung) */
+const PIECE_WEIGHTS = {
+  up: 5, down: 5, left: 5, right: 5,
+  freeze: 1, checkpoint: 1, boost: 1, destroyer: 1
+};
+
+const PIECE_ICON = {
+  up: "▲", down: "▼", left: "◄", right: "►",
+  freeze: "❄️", checkpoint: "🚩", boost: "⚡", destroyer: "💥"
+};
+
+const SPECIAL_META = {
+  freeze:     { icon: "❄️", name: { de: "Zeitstopp",  en: "Time Stop" } },
+  checkpoint: { icon: "🚩", name: { de: "Checkpoint", en: "Checkpoint" } },
+  boost:      { icon: "⚡", name: { de: "Boost",      en: "Boost" } },
+  destroyer:  { icon: "💥", name: { de: "Zerstörer",  en: "Destroyer" } }
+};
+
+function randomPieceType() {
+  const pool = [];
+  DIRECTION_PIECES.forEach(type => {
+    for (let i = 0; i < PIECE_WEIGHTS[type]; i++) pool.push(type);
+  });
+  SPECIAL_PIECES.forEach(type => {
+    if (!state.enabledPowerups[type]) return; // im Menü deaktiviert
+    for (let i = 0; i < PIECE_WEIGHTS[type]; i++) pool.push(type);
+  });
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/* Erzeugt ein zufälliges Spielfeld ohne bereits vorhandene 3er-Reihen */
+function createInitialBoard() {
+  const rows = CONFIG.MATCH3_ROWS, cols = CONFIG.MATCH3_COLS;
+  const board = [];
+  for (let r = 0; r < rows; r++) {
+    board.push([]);
+    for (let c = 0; c < cols; c++) {
+      let type, attempts = 0;
+      do {
+        type = randomPieceType();
+        attempts++;
+      } while (
+        attempts < 12 && (
+          (c >= 2 && board[r][c - 1] === type && board[r][c - 2] === type) ||
+          (r >= 2 && board[r - 1][c] === type && board[r - 2][c] === type)
+        )
+      );
+      board[r].push(type);
+    }
+  }
+  return board;
+}
+
+function initMatch3Boards() {
+  state.players.p1.board = createInitialBoard();
+  state.players.p2.board = createInitialBoard();
+  ensurePlayableBoard("p1");
+  ensurePlayableBoard("p2");
+}
+
+/* ---------- Rendering des Spielfelds ---------- */
+function getCellEl(playerId, r, c) {
+  const grid = document.getElementById(`match3-grid-${playerId}`);
+  return grid ? grid.querySelector(`[data-r="${r}"][data-c="${c}"]`) : null;
+}
+
+function renderMatch3Grid(playerId) {
+  const grid = document.getElementById(`match3-grid-${playerId}`);
+  if (!grid) return;
+  const player = state.players[playerId];
+  if (!player.board) return;
+
+  grid.innerHTML = "";
+  const rows = player.board.length, cols = player.board[0].length;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const type = player.board[r][c];
+      const cell = document.createElement("div");
+      cell.className = `match3-cell piece-${type}`;
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      cell.textContent = PIECE_ICON[type] || "";
+      if (player.selected && player.selected.r === r && player.selected.c === c) {
+        cell.classList.add("selected");
+      }
+      cell.addEventListener("click", () => onCellClick(playerId, r, c));
+      grid.appendChild(cell);
+    }
+  }
+
+  if (typeof updateGridAccessibility === "function") updateGridAccessibility();
+}
+
+/* Darf gerade auf dieses Feld geklickt werden? Eigenes Feld: immer.
+   Fremdes Feld: nur während ein aktiver Zerstörer noch Ladungen hat
+   (der Powerup öffnet den Gegner-Bereich gezielt). */
+function isBoardClickable(playerId) {
+  if (state.destroyerMode && state.destroyerMode.charges > 0) return true;
+  return isLocalPlayerAllowed(playerId);
+}
+
+/* ---------- Auswahl / Swap ---------- */
+function onCellClick(playerId, r, c) {
+  if (!isBoardClickable(playerId)) return;
+
+  if (typeof isOnlineGuest === "function" && isOnlineGuest()) {
+    sendPeerCommand({ type: "cmd_cell_click", playerId, r, c });
+    return;
+  }
+
+  hostApplyCellClick(playerId, r, c);
+  if (isOnlineHost()) broadcastFullState();
+}
+
+function hostApplyCellClick(playerId, r, c) {
+  if (state.destroyerMode && state.destroyerMode.charges > 0) {
+    tryDestroyBlock(playerId, r, c);
+    return;
+  }
+
+  const player = state.players[playerId];
+
+  if (!player.selected) {
+    player.selected = { r, c };
+    renderMatch3Grid(playerId);
+    return;
+  }
+
+  const { r: sr, c: sc } = player.selected;
+  if (sr === r && sc === c) {
+    player.selected = null;
+    renderMatch3Grid(playerId);
+    return;
+  }
+
+  const isAdjacent = Math.abs(sr - r) + Math.abs(sc - c) === 1;
+  player.selected = null;
+
+  if (!isAdjacent) {
+    player.selected = { r, c };
+    renderMatch3Grid(playerId);
+    return;
+  }
+
+  swapCells(playerId, sr, sc, r, c);
+}
+
+/* Neue Matchmaking-Regel: grundsätzlich kann jedes Feld getauscht werden.
+   Entsteht dabei ein Match, löst das die übliche Auswertung aus. Entsteht
+   KEIN Match, bleibt der Tausch trotzdem bestehen — es wird NICHT zurückgesetzt. */
+function swapCells(playerId, r1, c1, r2, c2) {
+  const board = state.players[playerId].board;
+  const tmp = board[r1][c1];
+  board[r1][c1] = board[r2][c2];
+  board[r2][c2] = tmp;
+  renderMatch3Grid(playerId);
+
+  const matches = findMatches(board);
+  if (matches.size > 0) {
+    resolveMatchesLoop(playerId, 1); // Match: Auslöser für die Auflösung
+  }
+  // Kein Match: Position bleibt unverändert bestehen, kein Zurücktauschen.
+}
+
+/* ---------- Match-Erkennung (horizontal + vertikal, >= 3 gleiche) ---------- */
+function findMatches(board) {
+  const matchedSet = new Set();
+  const rows = board.length, cols = board[0].length;
+
+  for (let r = 0; r < rows; r++) {
+    let runStart = 0;
+    for (let c = 1; c <= cols; c++) {
+      const cur = c < cols ? board[r][c] : null;
+      const prev = board[r][c - 1];
+      if (cur !== prev) {
+        if (c - runStart >= 3 && prev) {
+          for (let k = runStart; k < c; k++) matchedSet.add(r + "," + k);
+        }
+        runStart = c;
+      }
+    }
+  }
+
+  for (let c = 0; c < cols; c++) {
+    let runStart = 0;
+    for (let r = 1; r <= rows; r++) {
+      const cur = r < rows ? board[r][c] : null;
+      const prev = board[r - 1][c];
+      if (cur !== prev) {
+        if (r - runStart >= 3 && prev) {
+          for (let k = runStart; k < r; k++) matchedSet.add(k + "," + c);
+        }
+        runStart = r;
+      }
+    }
+  }
+
+  return matchedSet;
+}
+
+/* ---------- Nachfall-Mechanik ---------- */
+function applyGravity(board) {
+  const rows = board.length, cols = board[0].length;
+  for (let c = 0; c < cols; c++) {
+    const stack = [];
+    for (let r = rows - 1; r >= 0; r--) {
+      if (board[r][c] !== null) stack.push(board[r][c]);
+    }
+    for (let r = rows - 1; r >= 0; r--) {
+      board[r][c] = stack.length ? stack.shift() : randomPieceType();
+    }
+  }
+}
+
+/* ---------- Auflösen von Matches inkl. Combo-Multiplikator ----------
+   comboLevel 1 = normaler Match, 2 = erste Kettenreaktion (2x Guthaben), usw. */
+function resolveMatchesLoop(playerId, comboLevel, reshuffleAttempts) {
+  reshuffleAttempts = reshuffleAttempts || 0;
+  const board = state.players[playerId].board;
+  const matchedSet = findMatches(board);
+
+  if (matchedSet.size === 0) {
+    state.players[playerId].comboLevel = 0;
+    // Deadlock-Schutz: Ist kein gültiger Zug mehr möglich, Feld neu mischen
+    // (sonst käme nie wieder Guthaben nach — auch bei freier Bahn nicht).
+    if (!hasAnyValidMove(board) && reshuffleAttempts < 10) {
+      reshuffleBoard(board);
+      renderMatch3Grid(playerId);
+      resolveMatchesLoop(playerId, 1, reshuffleAttempts + 1); // erneut prüfen
+    }
+    return;
+  }
+
+  state.players[playerId].comboLevel = comboLevel;
+
+  // White-Flash + Shrink-Animation
+  matchedSet.forEach(key => {
+    const [r, c] = key.split(",").map(Number);
+    const cellEl = getCellEl(playerId, r, c);
+    if (cellEl) cellEl.classList.add("matched");
+  });
+
+  // Guthaben & Spezial-Inventar auswerten
+  const gains = {};
+  const specialsGainedSet = new Set(); // je Powerup-Typ nur 1x pro Match-Ereignis
+  matchedSet.forEach(key => {
+    const [r, c] = key.split(",").map(Number);
+    const type = board[r][c];
+    if (!type) return;
+    if (DIRECTION_PIECES.includes(type)) {
+      gains[type] = (gains[type] || 0) + 1;
+    } else {
+      specialsGainedSet.add(type);
+    }
+  });
+
+  const multiplier = comboLevel; // Combo-Multiplikator: 2x Guthaben bei Kettenreaktion
+  const res = state.players[playerId].resources;
+  DIRECTION_PIECES.forEach(dir => {
+    if (gains[dir]) {
+      res[dir] = Math.min(CONFIG.MAX_RESOURCE, res[dir] + gains[dir] * multiplier);
+    }
+  });
+  buildResourceBars(playerId);
+  updateDpad(playerId);
+
+  // Max. 2 Spezialfähigkeiten im Besitz — weitere verfallen automatisch (edge case).
+  // Ein Powerup wird pro Match-Ereignis nur einmal gutgeschrieben, unabhängig
+  // davon wie viele gleiche Steine gleichzeitig gematcht wurden.
+  specialsGainedSet.forEach(type => addSpecialToInventory(playerId, type));
+
+  sfxPling(multiplier + specialsGainedSet.size);
+
+  setTimeout(() => {
+    matchedSet.forEach(key => {
+      const [r, c] = key.split(",").map(Number);
+      board[r][c] = null;
+    });
+    applyGravity(board);
+    renderMatch3Grid(playerId);
+    resolveMatchesLoop(playerId, comboLevel + 1); // Kettenreaktion erneut prüfen
+    if (typeof broadcastFullState === "function") broadcastFullState();
+  }, 320);
+}
+
+/* ---------- Spezial-Inventar (max. 2, leere Slots = graues "X") ---------- */
+function addSpecialToInventory(playerId, type) {
+  const slots = state.players[playerId].specialSlots;
+  const freeIdx = slots.findIndex(s => s === null);
+  if (freeIdx === -1) return false; // Inventar voll: Fähigkeit verfällt lautlos
+  const meta = SPECIAL_META[type];
+  slots[freeIdx] = { type, icon: meta.icon, name: meta.name[state.lang] };
+  buildSpecialSlots(playerId);
+  return true;
+}
+
+function activateSpecial(playerId, idx) {
+  if (typeof isOnlineGuest === "function" && isOnlineGuest()) {
+    sendPeerCommand({ type: "cmd_activate_special", playerId, idx });
+    return;
+  }
+
+  if (state.destroyerMode) return; // Ein Zerstörer ist bereits aktiv — keine Zweitaktivierung
+  const slot = state.players[playerId].specialSlots[idx];
+  if (!slot) return;
+
+  switch (slot.type) {
+    case "freeze":
+      world.frost.active = true;
+      world.frost.timerMs = world.frost.totalMs;
+      state.players[playerId].specialSlots[idx] = null;
+      break;
+    case "checkpoint":
+      // Nur auf einer Grünzeile aktivierbar — schlägt die Aktivierung fehl,
+      // bleibt das Powerup im Inventar erhalten (Slot wird nicht geleert).
+      if (setPlayerCheckpoint(playerId)) {
+        state.players[playerId].specialSlots[idx] = null;
+      }
+      break;
+    case "boost":
+      applyBoost(playerId);
+      state.players[playerId].specialSlots[idx] = null;
+      break;
+    case "destroyer":
+      // Vollwertiges Powerup ohne eigene Anzeige: öffnet für die nächsten
+      // 5 Klicks beide Spielfelder (auch das des Gegners) zum Zerstören.
+      // Die Restanzahl wird direkt als Badge auf dem Powerup-Symbol angezeigt.
+      state.destroyerMode = { ownerId: playerId, slotIdx: idx, charges: 5 };
+      break;
+  }
+
+  buildSpecialSlots(playerId);
+  if (typeof updateGridAccessibility === "function") updateGridAccessibility();
+  if (isOnlineHost()) broadcastFullState();
+}
+
+/* Setzt einen dauerhaften Checkpoint — nur möglich, während der Frosch auf
+   einer Grünzeile (Median oder Start) steht. Gibt zurück, ob es geklappt hat. */
+function setPlayerCheckpoint(playerId) {
+  const frog = frogs[playerId];
+  if (FIELD_LAYOUT[frog.row] !== "grass") return false;
+  const cp = playerCheckpoints[playerId];
+  cp.active = true;
+  cp.row = frog.row;
+  return true;
+}
+
+function applyBoost(playerId) {
+  const res = state.players[playerId].resources;
+  CONFIG.DIRECTIONS.forEach(dir => {
+    res[dir] = Math.min(CONFIG.MAX_RESOURCE, res[dir] + 2);
+  });
+  buildResourceBars(playerId);
+  updateDpad(playerId);
+}
+
+/* ---------- Block-Zerstörer als vollwertiges Powerup ----------
+   Keine eigene Anzeige/Leiste mehr: Aktivierung öffnet für 5 Klicks in
+   Folge BEIDE Spielfelder (auch das des Gegners) zum Zerstören einzelner
+   Steine. Die Restanzahl steht als Badge auf dem Powerup-Icon selbst.
+   Nach dem letzten Klick verschwindet der Slot und der Gegner-Bereich
+   wird wieder verschlossen. */
+function tryDestroyBlock(targetPlayerId, r, c) {
+  if (!state.destroyerMode || state.destroyerMode.charges <= 0) return;
+
+  const board = state.players[targetPlayerId].board;
+  const cellEl = getCellEl(targetPlayerId, r, c);
+  if (cellEl) cellEl.classList.add("matched");
+  sfxPling(1);
+
+  const ownerId = state.destroyerMode.ownerId;
+  const slotIdx = state.destroyerMode.slotIdx;
+  state.destroyerMode.charges--;
+  buildSpecialSlots(ownerId); // Badge mit neuer Restanzahl aktualisieren
+
+  setTimeout(() => {
+    board[r][c] = null;
+    applyGravity(board);
+    renderMatch3Grid(targetPlayerId);
+    resolveMatchesLoop(targetPlayerId, 1); // mögliche Kettenreaktion nach dem Zerstören
+
+    if (state.destroyerMode && state.destroyerMode.charges <= 0) {
+      // Powerup verbraucht: Slot leeren, Gegner-Bereich wieder schließen.
+      state.players[ownerId].specialSlots[slotIdx] = null;
+      state.destroyerMode = null;
+      buildSpecialSlots(ownerId);
+      updateGridAccessibility();
+    }
+  }, 320);
+}
+
+/* ---------- Debug-Tasten: QA-Vorschau für Weltsysteme ----------
+   Nützlich zum Testen unabhängig vom Match-3-Zufall; die echten
+   Fähigkeiten werden weiterhin über das Spezial-Inventar ausgelöst. */
+document.addEventListener("keydown", (e) => {
+  if (document.activeElement.tagName === "INPUT") return;
+  switch (e.key) {
+    case "1":
+      world.frost.active = !world.frost.active;
+      world.frost.timerMs = world.frost.totalMs;
+      break;
+    case "2":
+      setPlayerCheckpoint("p1");
+      break;
+    case "3":
+      spawnParticles(frogs.p1.col * CELL + CELL / 2, frogs.p1.row * CELL + CELL / 2, "#ff477e", 18);
+      triggerShake();
+      break;
+    case "4":
+      sfxFanfare();
+      break;
+    case "5":
+      sfxPling(4);
+      break;
+    case "6":
+      addSpecialToInventory("p1", SPECIAL_PIECES[Math.floor(Math.random() * SPECIAL_PIECES.length)]);
+      break;
+    case "7":
+      addSpecialToInventory("p1", "destroyer");
+      break;
+  }
+});
+
+/* =============================================================
+   PHASE 4 — SINGLEPLAYER-KI, PEERJS-MULTIPLAYER,
+   MATCH-HISTORIE & SIEGSCHIRM
+   ============================================================= */
+
+/* ---------- Zugriffskontrolle: wer darf welchen Frosch lokal steuern? ---------- */
+function isLocalPlayerAllowed(playerId) {
+  if (state.mode === "ai-easy" || state.mode === "ai-hard") {
+    return playerId === "p1";
+  }
+  if (state.mode === "online") {
+    const localId = state.peerRole === "guest" ? "p2" : "p1";
+    return playerId === localId;
+  }
+  return playerId === "p1";
+}
+
+function isOnlineGuest() {
+  return state.mode === "online" && state.peerRole === "guest";
+}
+
+function isOnlineHost() {
+  return state.mode === "online" && state.peerRole !== "guest";
+}
+
+/* Spiegelt die Zugriffskontrolle visuell auf die Match-3-Felder:
+   fremde Felder sind gesperrt (abgedunkelt, keine Klicks), außer ein
+   aktiver Zerstörer öffnet sie gerade gezielt. */
+function updateGridAccessibility() {
+  ["p1", "p2"].forEach(pid => {
+    const grid = document.getElementById(`match3-grid-${pid}`);
+    if (!grid) return;
+    const ownedLocally = isLocalPlayerAllowed(pid);
+    const clickable = isBoardClickable(pid);
+    grid.classList.toggle("grid-locked", !clickable);
+    grid.classList.toggle(
+      "grid-destroyer-target",
+      !!(state.destroyerMode && !ownedLocally && clickable)
+    );
+  });
+}
+
+/* ---------- Vorausschauende Pfadvalidierung (für KI & zukünftige Erweiterungen) ----------
+   Simuliert Fahrzeug- und Seerosen-Zustände für n Welt-Ticks in die Zukunft,
+   ohne den echten Weltzustand zu verändern. */
+function predictCarsOccupying(row, col, ticksAhead) {
+  return world.cars.some(car => {
+    if (car.row !== row) return false;
+    const futureCol = ((car.col + car.dir * ticksAhead) % COLS + COLS) % COLS;
+    for (let l = 0; l < car.length; l++) {
+      const occ = ((futureCol - l * car.dir) % COLS + COLS) % COLS;
+      if (occ === col) return true;
+    }
+    return false;
+  });
+}
+
+function isPathSafeAtTick(row, col, ticksAhead) {
+  const type = FIELD_LAYOUT[row];
+  if (type === "road") return !predictCarsOccupying(row, col, ticksAhead);
+  if (type === "log") return predictLogsOccupying(row, col, ticksAhead); // muss von einem Balken getragen werden
+  if (type === "lily") return isLilySafe(row, col); // alle 3 Phasen begehbar, zeitunabhängig
+  return true; // Wiese/Hecke ist immer sicher
+}
+
+function computeTargetCell(frog, dir) {
+  let row = frog.row, col = frog.col;
+  if (dir === "up") row = Math.max(0, row - 1);
+  if (dir === "down") row = Math.min(ROWS - 1, row + 1);
+  if (dir === "left") col = Math.max(0, col - 1);
+  if (dir === "right") col = Math.min(COLS - 1, col + 1);
+  if (row === frog.row && col === frog.col) return null;
+  if (isCellBlockedByHedge(row, col)) return null;
+  return { row, col };
+}
+
+function simulateTargetCell(row, col, dir) {
+  let nRow = row, nCol = col;
+  if (dir === "up") nRow = Math.max(0, row - 1);
+  if (dir === "down") nRow = Math.min(ROWS - 1, row + 1);
+  if (dir === "left") nCol = Math.max(0, col - 1);
+  if (dir === "right") nCol = Math.min(COLS - 1, col + 1);
+  if (nRow === row && nCol === col) return null;
+  if (isCellBlockedByHedge(nRow, nCol)) return null;
+  return { row: nRow, col: nCol };
+}
+
+/* ---------- KI-Entscheidungslogik: echte zeitindexierte Pfadsuche ----------
+   Ersetzt das komplette alte Regelwerk (Prioritäts-Gewichte, Ausweich-
+   Vorregeln, mehrtick-Sicherheitsfenster am selben Feld). Der frühere Ansatz
+   verlangte, dass ein Zielfeld für mehrere TICKS IN FOLGE sicher bleibt
+   ("Sicherheitsfenster") — bei dichtem Verkehr ist das aber oft rechnerisch
+   NIE erfüllbar, obwohl eine Überquerung real möglich wäre, weil der Frosch
+   ja jeden Tick weiterzieht und nicht auf demselben Feld stehen bleibt.
+
+   Die neue Suche prüft stattdessen für JEDEN simulierten Schritt GENAU den
+   Zeitpunkt (Tick), zu dem der Frosch dort tatsächlich ankäme — nicht mehr.
+   So findet die KI auch knappe, aber echte Lücken im Verkehr, die vorher
+   fälschlich als "unsicher" verworfen wurden.
+
+   Gilt einheitlich für alle Schwierigkeitsgrade (vorerst keine Unterscheidung
+   in der Entscheidungsqualität — nur das Aktions-Tempo unterscheidet sich,
+   siehe runAIForTick). */
+const AI_SEARCH_DEPTH = 6; // wie viele Züge die KI vorausdenkt
+
+function searchBestProgress(row, col, tickOffset, depth) {
+  if (row === 0) return 100000 - tickOffset; // Zielhecke erreicht: je früher, desto besser
+  const progressHere = (ROWS - 1) - row; // je kleiner die Zeile, desto weiter Richtung Ziel
+  if (depth <= 0) return progressHere;
+
+  let best = progressHere; // "Warten" ist an dieser Stelle immer mit eingerechnet
+
+  for (const dir of ["up", "left", "right", "down"]) {
+    const target = simulateTargetCell(row, col, dir);
+    if (!target) continue;
+    if (!isPathSafeAtTick(target.row, target.col, tickOffset)) continue;
+    const future = searchBestProgress(target.row, target.col, tickOffset + 1, depth - 1);
+    if (future > best) best = future;
+  }
+
+  return best;
+}
+
+function aiDecideMove(playerId) {
+  const frog = frogs[playerId];
+  const res = state.players[playerId].resources;
+  const ai = aiState[playerId];
+
+  const candidates = [];
+
+  // Warten: aktuelle Position bleibt bestehen, die Suche geht ab dem
+  // NÄCHSTEN Tick weiter (Tick-Offset 1).
+  candidates.push({
+    dir: null,
+    score: searchBestProgress(frog.row, frog.col, 1, AI_SEARCH_DEPTH - 1)
+  });
+
+  ["up", "left", "right", "down"].forEach(dir => {
+    if (res[dir] <= 0) return;
+    const target = computeTargetCell(frog, dir);
+    if (!target) return;
+    // Ist das Zielfeld JETZT (Tick 0) sicher? Nur das zählt für den
+    // tatsächlichen, unmittelbar bevorstehenden Schritt.
+    if (!isPathSafeAtTick(target.row, target.col, 0)) return;
+    const future = searchBestProgress(target.row, target.col, 1, AI_SEARCH_DEPTH - 1);
+    candidates.push({ dir, score: future });
+  });
+
+  // Anti-Zittern: die letzte Bewegung nicht direkt rückgängig machen,
+  // solange eine mindestens gleichwertige Alternative existiert.
+  const opposite = { up: "down", down: "up", left: "right", right: "left" };
+  const lastDir = ai ? ai.lastDir : null;
+  const filtered = lastDir ? candidates.filter(c => c.dir === null || c.dir !== opposite[lastDir]) : candidates;
+  const pool = filtered.length > 0 ? filtered : candidates;
+
+  // Bei Gleichstand im Fortschritts-Score entscheidet die Grundpriorität
+  // (oben vor seitlich vor Rückzug vor Warten) als reiner Tie-Breaker.
+  const dirRank = { up: 4, left: 3, right: 3, down: 1 };
+  pool.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const rankA = a.dir === null ? 2 : (dirRank[a.dir] || 0);
+    const rankB = b.dir === null ? 2 : (dirRank[b.dir] || 0);
+    return rankB - rankA;
+  });
+
+  const chosen = pool[0].dir;
+  if (ai && chosen !== null) ai.lastDir = chosen;
+  return chosen; // null = KI wartet bewusst ab
+}
+
+function aiAttemptMove(playerId) {
+  const dir = aiDecideMove(playerId);
+  if (dir) performDirectionMove(playerId, dir);
+}
+
+/* ---------- KI-Match-3: sucht einen gültigen Zug und führt ihn aus ---------- */
+function swapTest(board, r1, c1, r2, c2) {
+  const tmp = board[r1][c1];
+  board[r1][c1] = board[r2][c2];
+  board[r2][c2] = tmp;
+}
+
+function testSwapCreatesMatch(board, r1, c1, r2, c2) {
+  swapTest(board, r1, c1, r2, c2);
+  const has = findMatches(board).size > 0;
+  swapTest(board, r1, c1, r2, c2); // zurücktauschen (nur Test)
+  return has;
+}
+
+function findFirstValidSwap(board) {
+  const rows = board.length, cols = board[0].length;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (c + 1 < cols && testSwapCreatesMatch(board, r, c, r, c + 1)) {
+        return { r1: r, c1: c, r2: r, c2: c + 1 };
+      }
+      if (r + 1 < rows && testSwapCreatesMatch(board, r, c, r + 1, c)) {
+        return { r1: r, c1: c, r2: r + 1, c2: c };
+      }
+    }
+  }
+  return null;
+}
+
+/* ---------- Deadlock-Schutz ----------
+   Ein Match-3-Feld kann in einen Zustand geraten, in dem KEIN Zug mehr
+   irgendein Match erzeugt ("Deadlock"). Ohne Gegenmaßnahme würde dann nie
+   wieder Guthaben nachkommen — weder für den Menschen noch für die KI —
+   selbst wenn der Weg über das Spielfeld frei wäre. Deshalb wird nach jeder
+   vollständig abgeschlossenen Auflösung geprüft, ob noch ein gültiger Zug
+   existiert; falls nicht, wird das Feld automatisch neu gemischt. */
+function hasAnyValidMove(board) {
+  return findFirstValidSwap(board) !== null;
+}
+
+function reshuffleBoard(board) {
+  const rows = board.length, cols = board[0].length;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      board[r][c] = randomPieceType();
+    }
+  }
+}
+
+function ensurePlayableBoard(playerId) {
+  const board = state.players[playerId].board;
+  if (!board) return;
+  let attempts = 0;
+  while (!hasAnyValidMove(board) && attempts < 30) {
+    reshuffleBoard(board);
+    attempts++;
+  }
+  renderMatch3Grid(playerId);
+}
+
+function aiAttemptMatch(playerId) {
+  const player = state.players[playerId];
+  if (player.selected || !player.board) return;
+  const swap = findFirstValidSwap(player.board);
+  if (swap) swapCells(playerId, swap.r1, swap.c1, swap.r2, swap.c2);
+}
+
+/* ---------- KI-Spezialfähigkeiten (nur Modus Schwer) ---------- */
+function aiUseSpecialsStrategically(playerId) {
+  if (state.destroyerMode) return; // schon ein Zerstörer aktiv, keine weitere Aktion
+  const slots = state.players[playerId].specialSlots;
+  const frog = frogs[playerId];
+  const type = FIELD_LAYOUT[frog.row];
+
+  const cpIdx = slots.findIndex(s => s && s.type === "checkpoint");
+  if (cpIdx !== -1 && type === "grass" && !playerCheckpoints[playerId].active) {
+    activateSpecial(playerId, cpIdx);
+    return;
+  }
+
+  const boostIdx = slots.findIndex(s => s && s.type === "boost");
+  if (boostIdx !== -1 && CONFIG.DIRECTIONS.some(d => state.players[playerId].resources[d] === 0)) {
+    activateSpecial(playerId, boostIdx);
+    return;
+  }
+
+  const destroyerIdx = slots.findIndex(s => s && s.type === "destroyer");
+  if (destroyerIdx !== -1) {
+    // KI setzt den Zerstörer offensiv gegen das gegnerische (menschliche) Feld ein.
+    activateSpecial(playerId, destroyerIdx);
+    aiAutoConsumeDestroyer(playerId);
+    return;
+  }
+
+  const freezeIdx = slots.findIndex(s => s && s.type === "freeze");
+  if (freezeIdx !== -1 && aiDecideMove(playerId) === null) {
+    activateSpecial(playerId, freezeIdx);
+  }
+}
+
+/* KI kann nicht klicken — verbraucht die 5 Zerstörer-Ladungen automatisch,
+   gezielt auf zufälligen Feldern des gegnerischen (menschlichen) Bretts. */
+function aiAutoConsumeDestroyer(ownerId) {
+  const targetId = ownerId === "p2" ? "p1" : "p2";
+
+  function consumeOne() {
+    if (!state.destroyerMode || state.destroyerMode.ownerId !== ownerId || state.destroyerMode.charges <= 0) {
+      return;
+    }
+    const board = state.players[targetId].board;
+    if (!board) return;
+    const r = Math.floor(Math.random() * board.length);
+    const c = Math.floor(Math.random() * board[0].length);
+    tryDestroyBlock(targetId, r, c);
+
+    setTimeout(() => {
+      if (state.destroyerMode && state.destroyerMode.ownerId === ownerId && state.destroyerMode.charges > 0) {
+        consumeOne();
+      }
+    }, 420);
+  }
+
+  setTimeout(consumeOne, 300);
+}
+
+/* ---------- KI-Taktgeber: läuft einmal pro Welt-Tick ---------- */
+const aiState = {
+  p2: { enabled: true, difficulty: "easy", tickCounter: 0, lastDir: null }
+};
+
+function runAIForTick(playerId) {
+  const ai = aiState[playerId];
+  if (!ai || !ai.enabled || state.gameOver) return;
+  ai.tickCounter++;
+
+  if (ai.difficulty === "easy") {
+    // Leicht: bewegt sich jeden Welt-Tick, nutzt aber niemals Spezial-
+    // fähigkeiten. Die Entscheidungsqualität (aiDecideMove) ist bewusst
+    // identisch zu Schwer — der Unterschied liegt vorerst nur im
+    // Aktions-Tempo bzw. im Verzicht auf Spezialfähigkeiten.
+    aiAttemptMove(playerId);
+    aiAttemptMatch(playerId);
+  } else if (ai.difficulty === "hard") {
+    // Schwer: zusätzlich aktiver Spezial-Einsatz jeden Tick.
+    aiAttemptMove(playerId);
+    aiAttemptMatch(playerId);
+    aiUseSpecialsStrategically(playerId);
+  }
+}
+
+/* ---------- Spielmodus-Umschaltung ---------- */
+function setMode(mode) {
+  state.mode = mode;
+  aiState.p2.enabled = mode === "ai-easy" || mode === "ai-hard";
+  aiState.p2.difficulty = mode === "ai-hard" ? "hard" : "easy";
+
+  document.getElementById("online-panel").classList.toggle("hidden", mode !== "online");
+  const titleOnlinePanel = document.getElementById("title-online-panel");
+  if (titleOnlinePanel) titleOnlinePanel.classList.toggle("hidden", mode !== "online");
+
+  if (mode === "online") {
+    initPeer();
+  } else {
+    teardownPeer();
+  }
+
+  syncModeButtonsUI();
+  updateMatchStatusText();
+  updateDpad("p1");
+  updateDpad("p2");
+  buildSpecialSlots("p1");
+  buildSpecialSlots("p2");
+  if (typeof updateGridAccessibility === "function") updateGridAccessibility();
+  updateStartReadiness();
+}
+
+/* Hält die Modus-Buttons im Einstellungs-Modal und auf dem Titelbildschirm synchron */
+function syncModeButtonsUI() {
+  document.querySelectorAll("#mode-group .lang-btn, #title-mode-group .lang-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === state.mode);
+  });
+}
+
+/* Sperrt "SPIEL STARTEN" bis der gewählte Modus tatsächlich bereit ist:
+   KI-Modi sind sofort bereit, Online erst nach hergestellter Peer-Verbindung. */
+function updateStartReadiness() {
+  const startBtn = document.getElementById("title-start-btn");
+  const hint = document.getElementById("title-start-hint");
+  if (!startBtn) return;
+
+  const notice = document.getElementById("title-notice");
+  if (notice) {
+    if (state.titleNoticeKey) {
+      notice.textContent = t(state.titleNoticeKey);
+      notice.classList.remove("hidden");
+    } else {
+      notice.classList.add("hidden");
+    }
+  }
+
+  const online = state.mode === "online";
+  const connected = !!(peerConn && peerConn.open);
+  if (!online || !connected) {
+    state.onlineLocalReady = false;
+    state.onlineRemoteReady = false;
+  }
+
+  const ready = online ? connected : true;
+  const waitingForPeer = online && state.onlineLocalReady;
+  startBtn.disabled = !ready || waitingForPeer;
+
+  if (hint) {
+    let key = null;
+    if (!ready) key = "title_start_hint";
+    else if (waitingForPeer) key = "title_wait_peer_ready";
+    else if (online && state.onlineRemoteReady) key = "title_peer_is_ready";
+    if (key) {
+      hint.textContent = t(key);
+      hint.classList.remove("hidden");
+    } else {
+      hint.classList.add("hidden");
+    }
+  }
+  renderPowerupToggles(); // Sperre/Hinweis folgt Modus und Rolle
+}
+
+function updateMatchStatusText() {
+  const el = document.getElementById("match-status");
+  if (!el) return;
+  const statusKeys = {
+    "ai-easy": "mode_status_ai_easy",
+    "ai-hard": "mode_status_ai_hard",
+    online: "mode_status_online"
+  };
+  el.textContent = t(statusKeys[state.mode] || "mode_status_ai_easy");
+}
+
+document.querySelectorAll("#mode-group .lang-btn").forEach(btn => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+
+/* ---------- PeerJS P2P-Multiplayer-Synchronisation ----------
+   Vereinfachtes Modell: Host steuert P1 lokal, Gast steuert P2 lokal.
+   Jeder Welt-Tick sendet der lokal steuernde Client einen kompakten
+   Zustands-Snapshot seines eigenen Spielers an den Peer. */
+let peer = null;
+let peerConn = null;
+
+/* Aktualisiert Peer-ID/Status an BEIDEN Stellen gleichzeitig (Modal und
+   Titelbildschirm), damit die Host-Informationen sichtbar sind, egal wo
+   der Modus "Online" gewählt wurde. */
+function setPeerIdDisplay(id) {
+  ["peer-my-id", "title-peer-my-id"].forEach(elId => {
+    const el = document.getElementById(elId);
+    if (el) el.textContent = id;
+  });
+}
+
+function setPeerStatusDisplay(text) {
+  ["peer-status", "title-peer-status"].forEach(elId => {
+    const el = document.getElementById(elId);
+    if (el) el.textContent = text;
+  });
+}
+
+function initPeer() {
+  if (peer) return;
+  const PeerCtor = window.Peer;
+  if (!PeerCtor) {
+    setPeerStatusDisplay("PeerJS nicht verfügbar");
+    return;
+  }
+  peer = new PeerCtor();
+
+  peer.on("open", id => {
+    setPeerIdDisplay(id);
+  });
+
+  peer.on("connection", conn => {
+    peerConn = conn;
+    state.peerRole = "host";
+    wireConnection();
+  });
+
+  peer.on("error", err => {
+    setPeerStatusDisplay("Fehler: " + (err && err.type ? err.type : err));
+  });
+}
+
+function connectToPeer(remoteId) {
+  if (!peer || !remoteId) return;
+  peerConn = peer.connect(remoteId);
+  state.peerRole = "guest";
+  wireConnection();
+}
+
+/* Verbindung verloren (Gegenstelle weg, Netzwerk tot): Läuft gerade eine
+   Online-Partie, wird sie sauber beendet und beide Seiten landen mit einem
+   Hinweis wieder auf dem Titelbildschirm. Der Peer bleibt bestehen, sodass
+   eine neue Verbindung direkt möglich ist. */
+let lastPeerMsgTime = 0;
+
+function handleConnectionLost() {
+  const wasInMatch = state.started && state.mode === "online";
+  if (peerConn) {
+    try { peerConn.close(); } catch (e) { /* bereits geschlossen */ }
+  }
+  peerConn = null;
+  state.peerRole = null;
+  setPeerStatusDisplay(t("online_status_disconnected"));
+  if (wasInMatch) {
+    endGame(false, "notice_disconnected");
+  } else {
+    updateStartReadiness();
+  }
+}
+
+function wireConnection() {
+  if (!peerConn) return;
+  const conn = peerConn;
+  conn.on("open", () => {
+    lastPeerMsgTime = performance.now();
+    setPeerStatusDisplay(t(state.peerRole === "host" ? "online_status_host" : "online_status_guest"));
+    updateDpad("p1");
+    updateDpad("p2");
+    updateStartReadiness();
+    if (isOnlineHost() && state.started) broadcastFullState();
+    sendLeaderboard(); // Bestenlisten beider Geräte zusammenführen
+    sendHostSettings();
+  });
+  conn.on("data", handlePeerData);
+  conn.on("close", () => {
+    if (peerConn !== conn) return; // veraltete Verbindung, bereits ersetzt
+    handleConnectionLost();
+  });
+}
+
+/* Herzschlag: erkennt auch Abbrüche, bei denen kein close-Ereignis kommt. */
+setInterval(() => {
+  if (!peerConn || !peerConn.open) return;
+  peerConn.send({ type: "ping" });
+  if (performance.now() - lastPeerMsgTime > 8000) handleConnectionLost();
+}, 2000);
+
+function teardownPeer() {
+  if (peerConn) {
+    peerConn.close();
+    peerConn = null;
+  }
+  if (peer) {
+    peer.destroy();
+    peer = null;
+  }
+  state.peerRole = null;
+  setPeerIdDisplay("–");
+  setPeerStatusDisplay(t("online_status_disconnected"));
+  updateStartReadiness();
+}
+
+function sendHostSettings() {
+  if (!isOnlineHost() || !peerConn || !peerConn.open) return;
+  peerConn.send({ type: "settings", enabledPowerups: state.enabledPowerups });
+}
+
+function sendPeerCommand(cmd) {
+  if (!peerConn || !peerConn.open) return;
+  peerConn.send(cmd);
+}
+
+function broadcastFullState() {
+  if (!isOnlineHost() || !peerConn || !peerConn.open) return;
+  peerConn.send({
+    type: "state",
+    tick: world.tick,
+    ack: state.guestAckSeq,
+    frogs: {
+      p1: { row: frogs.p1.row, col: frogs.p1.col, squash: frogs.p1.squash },
+      p2: { row: frogs.p2.row, col: frogs.p2.col, squash: frogs.p2.squash }
+    },
+    cars: world.cars.map(c => ({ row: c.row, col: c.col, prevCol: c.prevCol, dir: c.dir, length: c.length, color: c.color })),
+    logs: world.logs.map(l => ({ row: l.row, col: l.col, prevCol: l.prevCol, dir: l.dir, length: l.length })),
+    lilyPads: world.lilyPads.map(p => ({ row: p.row, col: p.col, phase: p.phase, ticksInPhase: p.ticksInPhase })),
+    frost: { active: world.frost.active, timerMs: world.frost.timerMs, totalMs: world.frost.totalMs },
+    checkpoints: {
+      p1: { active: playerCheckpoints.p1.active, row: playerCheckpoints.p1.row },
+      p2: { active: playerCheckpoints.p2.active, row: playerCheckpoints.p2.row }
+    },
+    destroyerMode: state.destroyerMode,
+    players: {
+      p1: { resources: { ...state.players.p1.resources }, specialSlots: state.players.p1.specialSlots, board: state.players.p1.board, selected: state.players.p1.selected, comboLevel: state.players.p1.comboLevel },
+      p2: { resources: { ...state.players.p2.resources }, specialSlots: state.players.p2.specialSlots, board: state.players.p2.board, selected: state.players.p2.selected, comboLevel: state.players.p2.comboLevel }
+    },
+    wins: state.wins,
+    gameOver: state.gameOver,
+    hedgeGoals: HEDGE_GOAL_COLS,
+    usedGoalCols: [...usedGoalCols],
+    enabledPowerups: state.enabledPowerups
+  });
+}
+
+function applyHostState(data) {
+  // WICHTIG: Der Client führt seine eigene Interpolations-Uhr (world.elapsedMs)
+  // völlig unabhängig vom tatsächlichen Host-Takt weiter. Ohne Synchronisation
+  // läuft diese Uhr "aus der Phase" — die Autos würden dann regelmäßig
+  // sichtbar auf ihre alte Position (prevCol) zurückspringen, sobald neue
+  // Positionsdaten eintreffen, während die lokale Uhr zufällig gerade bei
+  // einem niedrigen Wert steht. Bei jedem ECHTEN neuen Welt-Tick (erkennbar
+  // an der geänderten Tick-Nummer) wird die Uhr daher exakt auf den
+  // Tick-Beginn zurückgesetzt, damit die Interpolation (prevCol -> col)
+  // wieder sauber bei 0 startet und synchron zum Host abläuft.
+  const isNewWorldTick = data.tick !== world.tick;
+  world.tick = data.tick;
+  frogs.p1.row = data.frogs.p1.row; frogs.p1.col = data.frogs.p1.col; frogs.p1.squash = data.frogs.p1.squash;
+  // Solange eigene Befehle noch nicht vom Host bestätigt sind, behält der
+  // Client die vorhergesagte Position seines Frosches (verhindert Zurückruckeln).
+  const keepOwnFrog = isOnlineGuest() && data.ack < state.cmdSeq && (performance.now() - state.lastCmdTime) < 1500;
+  if (!keepOwnFrog) {
+    frogs.p2.row = data.frogs.p2.row; frogs.p2.col = data.frogs.p2.col; frogs.p2.squash = data.frogs.p2.squash;
+  }
+
+  world.cars = data.cars;
+  world.logs = data.logs;
+  world.lilyPads = data.lilyPads;
+
+  if (isNewWorldTick) {
+    world.elapsedMs = 0;
+  }
+
+  world.frost.active = data.frost.active;
+  world.frost.timerMs = data.frost.timerMs;
+  world.frost.totalMs = data.frost.totalMs;
+
+  playerCheckpoints.p1.active = data.checkpoints.p1.active;
+  playerCheckpoints.p1.row = data.checkpoints.p1.row;
+  playerCheckpoints.p2.active = data.checkpoints.p2.active;
+  playerCheckpoints.p2.row = data.checkpoints.p2.row;
+
+  state.destroyerMode = data.destroyerMode;
+
+  ["p1", "p2"].forEach(pid => {
+    const incoming = data.players[pid];
+    Object.assign(state.players[pid].resources, incoming.resources);
+    state.players[pid].specialSlots = incoming.specialSlots;
+    if (incoming.board) state.players[pid].board = incoming.board;
+    state.players[pid].selected = incoming.selected;
+    state.players[pid].comboLevel = incoming.comboLevel;
+
+    buildResourceBars(pid);
+    updateDpad(pid);
+    buildSpecialSlots(pid);
+    renderMatch3Grid(pid);
+  });
+
+  state.wins = data.wins;
+  state.gameOver = data.gameOver;
+  HEDGE_GOAL_COLS = data.hedgeGoals;
+  usedGoalCols = new Set(data.usedGoalCols);
+  if (data.enabledPowerups) {
+    state.enabledPowerups = data.enabledPowerups;
+    renderPowerupToggles();
+  }
+
+  updateScoreDisplay();
+  updateMatchStatusText();
+  updateGridAccessibility();
+}
+
+function handlePeerData(data) {
+  if (!data || !data.type) return;
+  lastPeerMsgTime = performance.now();
+  if (data.type === "ping") return;
+
+  if (data.type === "end") {
+    if (state.started) endGame(false, "notice_peer_ended");
+    return;
+  }
+  if (data.type === "settings") {
+    if (isOnlineGuest() && data.enabledPowerups) {
+      state.enabledPowerups = data.enabledPowerups;
+      renderPowerupToggles();
+    }
+    return;
+  }
+  if (data.type === "leaderboard") {
+    mergeLeaderboard(data.list);
+    return;
+  }
+
+  if (data.type === "record") {
+    if (isOnlineGuest() && typeof data.time === "number") recordFrogTime(data.playerId, data.time, data.ts);
+    return;
+  }
+  if (data.type === "ready") {
+    state.onlineRemoteReady = true;
+    updateStartReadiness();
+    tryStartOnlineMatch();
+    return;
+  }
+  if (data.type === "start") {
+    if (!isOnlineGuest()) return;
+    state.onlineLocalReady = false;
+    state.onlineRemoteReady = false;
+    setMatchConfig(data.targetWins);
+    if (data.enabledPowerups) { state.enabledPowerups = data.enabledPowerups; }
+    beginMatch();
+    return;
+  }
+
+  if (data.type === "state") {
+    if (isOnlineGuest()) applyHostState(data);
+    return;
+  }
+  if (data.type === "cmd_move") {
+    if (!isOnlineHost()) return;
+    if (data.playerId !== "p2") return; // der Gast darf nur seinen eigenen Frosch steuern
+    if (typeof data.seq === "number") state.guestAckSeq = data.seq;
+    performDirectionMove(data.playerId, data.direction);
+    broadcastFullState();
+    return;
+  }
+  if (data.type === "cmd_cell_click") {
+    if (!isOnlineHost()) return;
+    hostApplyCellClick(data.playerId, data.r, data.c);
+    broadcastFullState();
+    return;
+  }
+  if (data.type === "cmd_activate_special") {
+    if (!isOnlineHost()) return;
+    activateSpecial(data.playerId, data.idx);
+    broadcastFullState();
+    return;
+  }
+  if (data.type === "point") {
+    if (data.wins) state.wins = data.wins;
+    showRoundPoint(data.winner);
+    return;
+  }
+  if (data.type === "win") {
+    if (!isOnlineGuest()) return;
+    state.gameOver = true;
+    sfxFanfare();
+    spawnFireworks();
+    showVictoryOverlay(data.winner);
+  }
+}
+
+document.getElementById("peer-connect-btn").addEventListener("click", () => {
+  const input = document.getElementById("peer-remote-id");
+  const remoteId = input ? input.value.trim() : "";
+  if (remoteId) connectToPeer(remoteId);
+});
+
+document.getElementById("title-peer-connect-btn").addEventListener("click", () => {
+  const input = document.getElementById("title-peer-remote-id");
+  const remoteId = input ? input.value.trim() : "";
+  if (remoteId) connectToPeer(remoteId);
+});
+
+/* ---------- Match-Historie (localStorage) ---------- */
+const MATCH_HISTORY_KEY = "amigaFroggerFastestFrogs_v3";
+
+/* Speichert nur die 5 schnellsten Frosch-Läufe (Zeit vom letzten Start/Respawn
+   bis zum Erreichen der Zielhecke), sortiert aufsteigend nach Zeit. */
+function recordFrogTime(playerId, elapsedMs, timestampIso) {
+  const list = loadLeaderboard();
+  list.push({
+    time: elapsedMs,
+    player: playerId,
+    mode: state.mode,
+    timestamp: timestampIso || new Date().toISOString()
+  });
+  saveLeaderboard(normalizeLeaderboard(list));
+  renderMatchHistory();
+}
+
+function loadLeaderboard() {
+  try {
+    const list = JSON.parse(localStorage.getItem(MATCH_HISTORY_KEY));
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLeaderboard(list) {
+  try {
+    localStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(list));
+  } catch (e) {
+    // Speicher nicht verfügbar (z. B. privater Modus) — Bestenliste gilt nur für diese Sitzung.
+  }
+}
+
+/* Entfernt Duplikate (derselbe Lauf liegt auf beiden Geräten vor), prüft die
+   Einträge, sortiert nach Zeit und behält nur die 5 schnellsten. */
+function normalizeLeaderboard(list) {
+  const seen = new Set();
+  const unique = [];
+  list.forEach(entry => {
+    if (!entry || typeof entry.time !== "number" || typeof entry.timestamp !== "string") return;
+    if (entry.player !== "p1" && entry.player !== "p2") return;
+    const key = entry.timestamp + "|" + entry.player + "|" + Math.round(entry.time);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(entry);
+  });
+  unique.sort((a, b) => a.time - b.time);
+  return unique.slice(0, 5);
+}
+
+/* Führt die Bestenliste des Mitspielers mit der eigenen zusammen. */
+function mergeLeaderboard(otherList) {
+  if (!Array.isArray(otherList)) return;
+  saveLeaderboard(normalizeLeaderboard(loadLeaderboard().concat(otherList)));
+  renderMatchHistory();
+}
+
+function sendLeaderboard() {
+  const list = loadLeaderboard();
+  if (list.length === 0) return;
+  sendPeerCommand({ type: "leaderboard", list });
+}
+
+function frogIconSvg(color) {
+  const fill = color === "green" ? "#6bcf7f" : "#ff5555";
+  const st = 'stroke="#1a1a2e" stroke-width="1"';
+  return '<svg class="lb-frog" viewBox="0 0 28 24" aria-hidden="true">' +
+    '<ellipse cx="7" cy="19" rx="4" ry="2.5" fill="' + fill + '" ' + st + '/>' +
+    '<ellipse cx="21" cy="19" rx="4" ry="2.5" fill="' + fill + '" ' + st + '/>' +
+    '<ellipse cx="14" cy="14" rx="10" ry="7.5" fill="' + fill + '" ' + st + '/>' +
+    '<circle cx="9" cy="7" r="4" fill="' + fill + '" ' + st + '/>' +
+    '<circle cx="19" cy="7" r="4" fill="' + fill + '" ' + st + '/>' +
+    '<circle cx="9" cy="7" r="1.6" fill="#1a1a2e"/>' +
+    '<circle cx="19" cy="7" r="1.6" fill="#1a1a2e"/>' +
+    '</svg>';
+}
+
+function formatLeaderboardTime(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+}
+
+function formatLeaderboardDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear() % 100).padStart(2, "0");
+  return dd + "." + mm + "." + yy;
+}
+
+function leaderboardRowHtml(rank, color, name, timeText, dateText) {
+  return '<div class="history-entry">' +
+    '<span class="lb-left"><span class="lb-rank">#' + rank + '</span><span title="' + name + '">' + frogIconSvg(color) + '</span></span>' +
+    '<span class="lb-time">\uD83D\uDD52 ' + timeText + '</span>' +
+    '<span class="history-date">' + dateText + '</span>' +
+    '</div>';
+}
+
+/* ---------- Powerups: einzeln aktivierbar/deaktivierbar ---------- */
+function renderPowerupToggles() {
+  const container = document.getElementById("powerup-toggle-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const locked = isOnlineGuest();
+  const hint = document.getElementById("powerup-host-hint");
+  if (hint) hint.classList.toggle("hidden", state.mode !== "online");
+
+  SPECIAL_PIECES.forEach(type => {
+    const meta = SPECIAL_META[type];
+    const enabled = state.enabledPowerups[type];
+
+    const row = document.createElement("div");
+    row.className = "powerup-toggle-row" + (enabled ? "" : " disabled") + (locked ? " locked" : "");
+    row.innerHTML = `
+      <span class="powerup-toggle-box">${enabled ? "☒" : "☐"}</span>
+      <span class="powerup-toggle-icon">${meta.icon}</span>
+      <span class="powerup-toggle-desc"><strong>${meta.name[state.lang]}</strong> — ${t("powerup_desc_" + type)}</span>
+    `;
+    if (!locked) row.addEventListener("click", () => togglePowerup(type));
+    container.appendChild(row);
+  });
+}
+
+function togglePowerup(type) {
+  if (isOnlineGuest()) return; // Online gilt die Einstellung des Hosts für beide Spieler
+  state.enabledPowerups[type] = !state.enabledPowerups[type];
+  renderPowerupToggles();
+  sendHostSettings();
+}
+
+function renderMatchHistory() {
+  const container = document.getElementById("match-history-list");
+  if (!container) return;
+  const list = loadLeaderboard();
+  const rows = [];
+
+  if (list.length === 0) {
+    // Ohne echte Läufe ist nur Platz 1 vorbelegt: Sieger-Frosch, 4:20, 13.10.26.
+    rows.push(leaderboardRowHtml(1, "green", t("history_p1"), "4:20", "13.10.26"));
+  } else {
+    list.slice(0, 5).forEach((entry, idx) => {
+      const isP1 = entry.player === "p1";
+      rows.push(leaderboardRowHtml(
+        idx + 1,
+        isP1 ? "green" : "red",
+        isP1 ? t("history_p1") : t("history_p2"),
+        formatLeaderboardTime(entry.time),
+        formatLeaderboardDate(entry.timestamp)
+      ));
+    });
+  }
+
+  // Übrige Plätze (bis 5) bleiben leer.
+  for (let rank = rows.length + 1; rank <= 5; rank++) {
+    rows.push('<div class="history-entry history-entry-empty"><span class="lb-left"><span class="lb-rank">#' + rank + '</span></span><span class="history-date">' + t("history_empty") + '</span></div>');
+  }
+  container.innerHTML = rows.join("");
+}
+
+/* ---------- Siegbildschirm mit Pixel-Feuerwerk ---------- */
+let fireworksInterval = null;
+
+function spawnFireworks() {
+  let bursts = 0;
+  if (fireworksInterval) clearInterval(fireworksInterval);
+  fireworksInterval = setInterval(() => {
+    const x = 40 + Math.random() * (canvas.width - 80);
+    const y = 30 + Math.random() * (canvas.height * 0.5);
+    const color = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+    spawnParticles(x, y, color, 26);
+    bursts++;
+    if (bursts > 12) {
+      clearInterval(fireworksInterval);
+      fireworksInterval = null;
+    }
+  }, 320);
+}
+
+function showVictoryOverlay(winnerId) {
+  const loserId = winnerId === "p1" ? "p2" : "p1";
+  const overlay = document.getElementById("victory-overlay");
+  const title = document.getElementById("victory-title");
+  const subtitle = document.getElementById("victory-subtitle");
+  const winnerLabel = winnerId === "p1" ? t("p1_heading") : t("p2_heading");
+  const loserLabel = loserId === "p1" ? t("p1_heading") : t("p2_heading");
+
+  const localId = isOnlineGuest() ? "p2" : "p1";
+  const iWon = winnerId === localId;
+  title.textContent = iWon ? t("victory_winner_label") : t("victory_loser_label");
+  title.style.color = iWon ? "var(--amiga-yellow)" : "var(--amiga-red)";
+  subtitle.textContent = `${winnerLabel} ${t("victory_subtitle")}`;
+
+  document.getElementById("victory-winner-name").textContent = winnerLabel;
+  document.getElementById("victory-loser-name").textContent = loserLabel;
+
+  // Froschfarbe entspricht dem tatsächlichen Spieler (P1=grün, P2=rot),
+  // nicht fix an Sieg/Niederlage gebunden.
+  const winnerIcon = document.getElementById("victory-winner-icon");
+  const loserIcon = document.getElementById("victory-loser-icon");
+  winnerIcon.classList.remove("frog-color-green", "frog-color-red");
+  loserIcon.classList.remove("frog-color-green", "frog-color-red");
+  winnerIcon.classList.add(winnerId === "p1" ? "frog-color-green" : "frog-color-red");
+  loserIcon.classList.add(loserId === "p1" ? "frog-color-green" : "frog-color-red");
+
+  winnerIcon.parentElement.classList.toggle("victory-result-me", winnerId === localId);
+  loserIcon.parentElement.classList.toggle("victory-result-me", loserId === localId);
+
+  overlay.classList.remove("hidden");
+}
+
+/* ---------- Punktestand-Anzeige (nur relevant bei Spieldauer > 1) ---------- */
+function updateScoreDisplay() {
+  const el = document.getElementById("score-display");
+  if (!el) return;
+  if (state.matchConfig.targetWins <= 1) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = `P1 ${state.wins.p1 || 0} : ${state.wins.p2 || 0} P2`;
+}
+
+/* ---------- Zwischenstand: ein Frosch hat die Hecke erreicht, aber
+   das Spiel läuft weiter, da die Spieldauer (1-3) noch nicht erreicht ist. ---------- */
+function showRoundPoint(winnerId) {
+  const el = document.getElementById("match-status");
+  if (!el) return;
+  const label = winnerId === "p1" ? t("p1_heading") : t("p2_heading");
+  el.textContent = `${label} ${state.wins[winnerId]}/${state.matchConfig.targetWins}`;
+  el.classList.add("point-flash");
+  setTimeout(() => {
+    el.classList.remove("point-flash");
+    updateMatchStatusText();
+  }, 1800);
+}
+
+function respawnFrogAfterPoint(winnerId) {
+  const frog = frogs[winnerId];
+  frog.row = ROWS - 1;
+  frog.col = winnerId === "p1" ? 3 : 8;
+  frog.squash = 0;
+  frog.spawnTime = performance.now();
+  playerCheckpoints[winnerId].active = false;
+}
+
+/* ---------- Sieg: entweder Zwischenpunkt oder endgültiges Matchende ---------- */
+function declareWinner(winnerId, fromRemote) {
+  if (state.gameOver) return;
+
+  state.wins[winnerId] = (state.wins[winnerId] || 0) + 1;
+  sfxFanfare();
+
+  const target = state.matchConfig.targetWins;
+  if (state.wins[winnerId] >= target) {
+    state.gameOver = true;
+    spawnFireworks();
+    showVictoryOverlay(winnerId);
+
+    if (!fromRemote && state.mode === "online" && peerConn && peerConn.open) {
+      peerConn.send({ type: "win", winner: winnerId });
+    }
+  } else {
+    showRoundPoint(winnerId);
+    respawnFrogAfterPoint(winnerId);
+
+    if (!fromRemote && state.mode === "online" && peerConn && peerConn.open) {
+      peerConn.send({ type: "point", winner: winnerId, wins: state.wins });
+    }
+  }
+
+  updateMatchStatusText();
+  updateScoreDisplay();
+}
+
+/* ---------- Spiel zurücksetzen (neue Partie mit den gewählten Einstellungen) ---------- */
+function resetGame() {
+  state.gameOver = false;
+  state.wins = { p1: 0, p2: 0 };
+  state.destroyerMode = null;
+
+  frogs.p1.row = ROWS - 1; frogs.p1.col = 3; frogs.p1.squash = 0; frogs.p1.spawnTime = performance.now();
+  frogs.p2.row = ROWS - 1; frogs.p2.col = 8; frogs.p2.squash = 0; frogs.p2.spawnTime = performance.now();
+
+  playerCheckpoints.p1.active = false;
+  playerCheckpoints.p2.active = false;
+  aiState.p2.lastDir = null;
+
+  ["p1", "p2"].forEach(pid => {
+    const player = state.players[pid];
+    CONFIG.DIRECTIONS.forEach(d => { player.resources[d] = 5; });
+    player.specialSlots = [null, null];
+    player.selected = null;
+    player.comboLevel = 0;
+  });
+
+  if (typeof isOnlineGuest === "function" && isOnlineGuest()) {
+    // Client generiert NIEMALS selbst eine Welt — sonst zwei unabhängige
+    // Simulationen. Er wartet auf den nächsten vollständigen Host-Broadcast.
+    // Die beim Laden lokal erzeugten Felder (mit ALLEN Icons) werden verworfen,
+    // damit nie Icons sichtbar sind, die der Host abgeschaltet hat.
+    ["p1", "p2"].forEach(pid => {
+      state.players[pid].board = null;
+      const grid = document.getElementById("match3-grid-" + pid);
+      if (grid) grid.innerHTML = "";
+    });
+    renderAll();
+    updateScoreDisplay();
+    updateGridAccessibility();
+    return;
+  }
+
+  randomizeHedgeGoals();
+  initCars();
+  initLogs();
+  initLilyPads();
+  initMatch3Boards();
+  renderAll();
+  updateScoreDisplay();
+  updateGridAccessibility();
+
+  if (typeof broadcastFullState === "function") broadcastFullState();
+}
+
+/* ---------- Titelbildschirm: Modus, Schwierigkeitsgrad & Spieldauer ---------- */
+function setMatchConfig(rounds) {
+  state.matchConfig.targetWins = rounds;
+  document.querySelectorAll("#title-rounds-group .lang-btn").forEach(b => {
+    b.classList.toggle("active", Number(b.dataset.rounds) === rounds);
+  });
+  updateScoreDisplay();
+}
+
+document.querySelectorAll("#title-mode-group .lang-btn").forEach(btn => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+
+document.querySelectorAll("#title-rounds-group .lang-btn").forEach(btn => {
+  btn.addEventListener("click", () => setMatchConfig(Number(btn.dataset.rounds)));
+});
+
+function beginMatch() {
+  state.titleNoticeKey = null;
+  document.getElementById("title-screen").classList.add("hidden");
+  world.elapsedMs = 0;
+  state.started = true;
+  resetGame();
+}
+
+/* Online: Der Host startet die Partie erst, wenn BEIDE "SPIEL STARTEN"
+   gedrückt haben — und schickt dem Client dann das Startsignal, damit
+   beide exakt gleichzeitig beginnen. */
+function tryStartOnlineMatch() {
+  if (!isOnlineHost()) return;
+  if (!state.onlineLocalReady || !state.onlineRemoteReady) return;
+  if (!peerConn || !peerConn.open) return;
+  sendPeerCommand({ type: "start", targetWins: state.matchConfig.targetWins, enabledPowerups: state.enabledPowerups });
+  state.onlineLocalReady = false;
+  state.onlineRemoteReady = false;
+  beginMatch();
+}
+
+document.getElementById("title-start-btn").addEventListener("click", () => {
+  if (state.mode === "online") {
+    if (!peerConn || !peerConn.open || state.onlineLocalReady) return;
+    state.onlineLocalReady = true;
+    sendPeerCommand({ type: "ready" });
+    updateStartReadiness();
+    tryStartOnlineMatch();
+    return;
+  }
+  beginMatch();
+});
+
+document.getElementById("victory-restart-btn").addEventListener("click", () => {
+  document.getElementById("victory-overlay").classList.add("hidden");
+  state.started = false;
+  state.onlineLocalReady = false;
+  state.onlineRemoteReady = false;
+  document.getElementById("title-screen").classList.remove("hidden");
+  updateStartReadiness();
+});
+
+/* ---------- Spiel Beenden: bricht die laufende Partie ab (kein Sieg/Verlust) ---------- */
+function endGame(notifyPeer, noticeKey) {
+  // Online: den Mitspieler informieren, damit BEIDE zum Titelbildschirm zurückkehren.
+  if (notifyPeer && state.mode === "online" && state.started && peerConn && peerConn.open) {
+    sendPeerCommand({ type: "end" });
+  }
+  state.onlineLocalReady = false;
+  state.onlineRemoteReady = false;
+  state.started = false;
+  state.gameOver = false;
+  state.destroyerMode = null;
+  state.titleNoticeKey = noticeKey || null;
+  document.getElementById("victory-overlay").classList.add("hidden");
+  document.getElementById("modal-overlay").classList.remove("open");
+  document.getElementById("title-screen").classList.remove("hidden");
+  updateStartReadiness();
+}
+
+document.getElementById("end-game-btn").addEventListener("click", () => endGame(true, null));
+
+document.getElementById("title-settings-btn").addEventListener("click", () => {
+  document.getElementById("modal-overlay").classList.add("open");
+});
+
+
+/* =============================================================
+   INIT
+   ============================================================= */
+function init() {
+  document.getElementById("game-title").textContent = CONFIG.GAME_TITLE;
+  document.getElementById("title-heading").textContent = CONFIG.GAME_TITLE;
+  document.querySelector("#footer-bar span").textContent = CONFIG.AUTHOR;
+  document.querySelector("#footer-bar").innerHTML =
+    `<span>${CONFIG.AUTHOR}</span> | ${CONFIG.VERSION}`;
+  renderAll();
+
+  initCars();
+  initLogs();
+  initLilyPads();
+  initMatch3Boards();
+  randomizeHedgeGoals();
+  updateMatchStatusText();
+  updateScoreDisplay();
+  renderMatchHistory();
+  syncModeButtonsUI();
+  updateGridAccessibility();
+  updateStartReadiness();
+  setInterval(updateAllStatusAreas, 200);
+  requestAnimationFrame(renderLoop);
+}
+
+init();
+</script>
+</body>
+</html>
