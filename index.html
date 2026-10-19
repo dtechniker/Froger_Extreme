@@ -1026,6 +1026,7 @@
       <div id="game-title" class="crt-glow">How to move a Frog</div>
       <div id="match-status">Bereit / Ready</div>
       <span id="score-display" class="score-display"></span>
+      <span id="net-info" class="score-display hidden"></span>
     </div>
     <div id="header-right">
       <button id="end-game-btn" title="Spiel beenden / End Game" data-i18n-title="end_game_hint">⏹️</button>
@@ -1065,6 +1066,7 @@
         <div class="row">
           <span id="title-peer-status" data-i18n="online_status_disconnected">Nicht verbunden</span>
         </div>
+        <div class="row"><span id="title-net-info" class="online-hint hidden"></span></div>
       </div>
 
       <div class="modal-section">
@@ -1349,6 +1351,11 @@ const CONFIG = {
       notice_peer_ended: "Der Mitspieler hat das Spiel beendet.",
       notice_disconnected: "Verbindung zum Mitspieler verloren — das Spiel wurde beendet.",
       powerup_host_hint: "Online gilt die Einstellung des Hosts für beide Spieler.",
+      online_status_connecting: "Verbinde …",
+      online_status_slow: "Verbindung dauert ungewöhnlich lange — Netzwerk/Firewall prüfen oder erneut verbinden.",
+      online_status_failed: "Verbindung fehlgeschlagen — bitte erneut verbinden.",
+      net_direct: "direkt",
+      net_relay: "über Relay-Server (langsamer)",
       title_peer_is_ready: "Mitspieler ist bereit — jetzt SPIEL STARTEN drücken",
       end_game_hint: "Spiel beenden"
     },
@@ -1411,6 +1418,11 @@ const CONFIG = {
       notice_peer_ended: "The other player ended the game.",
       notice_disconnected: "Connection to the other player was lost — the game has ended.",
       powerup_host_hint: "Online, the host's setting applies to both players.",
+      online_status_connecting: "Connecting …",
+      online_status_slow: "Connecting is taking unusually long — check network/firewall or reconnect.",
+      online_status_failed: "Connection failed — please reconnect.",
+      net_direct: "direct",
+      net_relay: "via relay server (slower)",
       title_peer_is_ready: "Other player is ready — press START GAME",
       end_game_hint: "End Game"
     }
@@ -1693,7 +1705,7 @@ function handleDirectionInput(playerId, direction) {
     return;
   }
   performDirectionMove(playerId, direction);
-  if (isOnlineHost()) broadcastFullState(); // Host-Bewegung sofort zum Client
+  if (isOnlineHost()) broadcastFullState(true); // Host-Bewegung sofort zum Client
 }
 
 document.querySelectorAll(".dpad-btn").forEach(btn => {
@@ -2861,7 +2873,7 @@ function onCellClick(playerId, r, c) {
   }
 
   hostApplyCellClick(playerId, r, c);
-  if (isOnlineHost()) broadcastFullState();
+  if (isOnlineHost()) broadcastFullState(true);
 }
 
 function hostApplyCellClick(playerId, r, c) {
@@ -3031,7 +3043,7 @@ function resolveMatchesLoop(playerId, comboLevel, reshuffleAttempts) {
     applyGravity(board);
     renderMatch3Grid(playerId);
     resolveMatchesLoop(playerId, comboLevel + 1); // Kettenreaktion erneut prüfen
-    if (typeof broadcastFullState === "function") broadcastFullState();
+    if (typeof broadcastFullState === "function") broadcastFullState(true);
   }, 320);
 }
 
@@ -3083,7 +3095,7 @@ function activateSpecial(playerId, idx) {
 
   buildSpecialSlots(playerId);
   if (typeof updateGridAccessibility === "function") updateGridAccessibility();
-  if (isOnlineHost()) broadcastFullState();
+  if (isOnlineHost()) broadcastFullState(true);
 }
 
 /* Setzt einen dauerhaften Checkpoint — nur möglich, während der Frosch auf
@@ -3572,6 +3584,7 @@ function updateStartReadiness() {
     }
   }
   renderPowerupToggles(); // Sperre/Hinweis folgt Modus und Rolle
+  renderNetInfo();
 }
 
 function updateMatchStatusText() {
@@ -3621,6 +3634,7 @@ function initPeer() {
     return;
   }
   peer = new PeerCtor();
+  setPeerIdDisplay("…"); // ID wird vom Server vergeben
 
   peer.on("open", id => {
     setPeerIdDisplay(id);
@@ -3637,10 +3651,30 @@ function initPeer() {
   });
 }
 
+let connectTimers = [];
+
+function clearConnectTimers() {
+  connectTimers.forEach(clearTimeout);
+  connectTimers = [];
+}
+
 function connectToPeer(remoteId) {
   if (!peer || !remoteId) return;
-  peerConn = peer.connect(remoteId);
+  clearConnectTimers();
+  // JSON statt BinaryPack: schlankere Verarbeitung der Zustandsnachrichten.
+  peerConn = peer.connect(remoteId, { serialization: "json", reliable: true });
   state.peerRole = "guest";
+  setPeerStatusDisplay(t("online_status_connecting"));
+  const conn = peerConn;
+  connectTimers.push(setTimeout(() => {
+    if (peerConn === conn && !conn.open) setPeerStatusDisplay(t("online_status_slow"));
+  }, 12000));
+  connectTimers.push(setTimeout(() => {
+    if (peerConn === conn && !conn.open) {
+      handleConnectionLost();
+      setPeerStatusDisplay(t("online_status_failed"));
+    }
+  }, 30000));
   wireConnection();
 }
 
@@ -3649,6 +3683,8 @@ function connectToPeer(remoteId) {
    Hinweis wieder auf dem Titelbildschirm. Der Peer bleibt bestehen, sodass
    eine neue Verbindung direkt möglich ist. */
 let lastPeerMsgTime = 0;
+let netLatencyMs = null;
+let netRoute = null;
 
 function handleConnectionLost() {
   const wasInMatch = state.started && state.mode === "online";
@@ -3657,6 +3693,10 @@ function handleConnectionLost() {
   }
   peerConn = null;
   state.peerRole = null;
+  clearConnectTimers();
+  netLatencyMs = null;
+  netRoute = null;
+  renderNetInfo();
   setPeerStatusDisplay(t("online_status_disconnected"));
   if (wasInMatch) {
     endGame(false, "notice_disconnected");
@@ -3665,11 +3705,59 @@ function handleConnectionLost() {
   }
 }
 
+function renderNetInfo() {
+  let text = "";
+  if (peerConn && peerConn.open && state.mode === "online") {
+    const parts = [];
+    if (netLatencyMs !== null) parts.push("📶 " + Math.round(netLatencyMs) + " ms");
+    if (netRoute) parts.push(t(netRoute === "relay" ? "net_relay" : "net_direct"));
+    text = parts.join(" · ");
+  }
+  ["net-info", "title-net-info"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("hidden", !text);
+  });
+}
+
+/* Prüft, ob die Verbindung direkt läuft oder über einen Relay-Server
+   (TURN) — Relay ist deutlich langsamer. */
+async function detectRouteType(conn) {
+  try {
+    const pc = conn.peerConnection;
+    if (!pc || !pc.getStats) return;
+    const stats = await pc.getStats();
+    const byId = {};
+    stats.forEach(r => { byId[r.id] = r; });
+    let pair = null;
+    stats.forEach(r => {
+      if (r.type === "transport" && r.selectedCandidatePairId) pair = byId[r.selectedCandidatePairId];
+    });
+    if (!pair) {
+      stats.forEach(r => {
+        if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") pair = r;
+      });
+    }
+    if (!pair) return;
+    const lt = (byId[pair.localCandidateId] || {}).candidateType;
+    const rt = (byId[pair.remoteCandidateId] || {}).candidateType;
+    netRoute = (lt === "relay" || rt === "relay") ? "relay" : "direct";
+    renderNetInfo();
+  } catch (e) {
+    // Statistik nicht verfügbar — keine Anzeige der Verbindungsart.
+  }
+}
+
 function wireConnection() {
   if (!peerConn) return;
   const conn = peerConn;
   conn.on("open", () => {
     lastPeerMsgTime = performance.now();
+    clearConnectTimers();
+    netLatencyMs = null;
+    netRoute = null;
+    setTimeout(() => detectRouteType(conn), 1200);
     setPeerStatusDisplay(t(state.peerRole === "host" ? "online_status_host" : "online_status_guest"));
     updateDpad("p1");
     updateDpad("p2");
@@ -3688,7 +3776,7 @@ function wireConnection() {
 /* Herzschlag: erkennt auch Abbrüche, bei denen kein close-Ereignis kommt. */
 setInterval(() => {
   if (!peerConn || !peerConn.open) return;
-  peerConn.send({ type: "ping" });
+  peerConn.send({ type: "ping", t: performance.now() });
   if (performance.now() - lastPeerMsgTime > 8000) handleConnectionLost();
 }, 2000);
 
@@ -3704,6 +3792,10 @@ function teardownPeer() {
   state.peerRole = null;
   setPeerIdDisplay("–");
   setPeerStatusDisplay(t("online_status_disconnected"));
+  clearConnectTimers();
+  netLatencyMs = null;
+  netRoute = null;
+  renderNetInfo();
   updateStartReadiness();
 }
 
@@ -3717,36 +3809,59 @@ function sendPeerCommand(cmd) {
   peerConn.send(cmd);
 }
 
-function broadcastFullState() {
+/* light=true: nur Frösche, Spielerdaten, Ziele usw. (nach Aktionen).
+   light=false: zusätzlich Welt (Autos, Balken, Seerosen, Zielhecke) — nach
+   jedem Welt-Tick, beim Start und beim Verbinden. Spielfelder werden bei
+   "light" nur gesendet, wenn sie sich seit dem letzten Senden geändert haben. */
+const lastSentBoardSig = { p1: null, p2: null };
+
+function broadcastFullState(light) {
   if (!isOnlineHost() || !peerConn || !peerConn.open) return;
-  peerConn.send({
+  const msg = {
     type: "state",
-    tick: world.tick,
     ack: state.guestAckSeq,
     frogs: {
       p1: { row: frogs.p1.row, col: frogs.p1.col, squash: frogs.p1.squash },
       p2: { row: frogs.p2.row, col: frogs.p2.col, squash: frogs.p2.squash }
     },
-    cars: world.cars.map(c => ({ row: c.row, col: c.col, prevCol: c.prevCol, dir: c.dir, length: c.length, color: c.color })),
-    logs: world.logs.map(l => ({ row: l.row, col: l.col, prevCol: l.prevCol, dir: l.dir, length: l.length })),
-    lilyPads: world.lilyPads.map(p => ({ row: p.row, col: p.col, phase: p.phase, ticksInPhase: p.ticksInPhase })),
     frost: { active: world.frost.active, timerMs: world.frost.timerMs, totalMs: world.frost.totalMs },
     checkpoints: {
       p1: { active: playerCheckpoints.p1.active, row: playerCheckpoints.p1.row },
       p2: { active: playerCheckpoints.p2.active, row: playerCheckpoints.p2.row }
     },
     destroyerMode: state.destroyerMode,
-    players: {
-      p1: { resources: { ...state.players.p1.resources }, specialSlots: state.players.p1.specialSlots, board: state.players.p1.board, selected: state.players.p1.selected, comboLevel: state.players.p1.comboLevel },
-      p2: { resources: { ...state.players.p2.resources }, specialSlots: state.players.p2.specialSlots, board: state.players.p2.board, selected: state.players.p2.selected, comboLevel: state.players.p2.comboLevel }
-    },
+    players: {},
     wins: state.wins,
     gameOver: state.gameOver,
-    hedgeGoals: HEDGE_GOAL_COLS,
-    usedGoalCols: [...usedGoalCols],
-    enabledPowerups: state.enabledPowerups
+    usedGoalCols: [...usedGoalCols]
+  };
+
+  ["p1", "p2"].forEach(pid => {
+    const pl = state.players[pid];
+    const sig = JSON.stringify(pl.board);
+    const sendBoard = !light || sig !== lastSentBoardSig[pid];
+    lastSentBoardSig[pid] = sig;
+    msg.players[pid] = {
+      resources: { ...pl.resources },
+      specialSlots: pl.specialSlots,
+      board: sendBoard ? pl.board : null,
+      selected: pl.selected,
+      comboLevel: pl.comboLevel
+    };
   });
+
+  if (!light) {
+    msg.tick = world.tick;
+    msg.cars = world.cars.map(c => ({ row: c.row, col: c.col, prevCol: c.prevCol, dir: c.dir, length: c.length, color: c.color }));
+    msg.logs = world.logs.map(l => ({ row: l.row, col: l.col, prevCol: l.prevCol, dir: l.dir, length: l.length }));
+    msg.lilyPads = world.lilyPads.map(p => ({ row: p.row, col: p.col, phase: p.phase, ticksInPhase: p.ticksInPhase }));
+    msg.hedgeGoals = HEDGE_GOAL_COLS;
+    msg.enabledPowerups = state.enabledPowerups;
+  }
+  peerConn.send(msg);
 }
+
+const applySigs = { p1: null, p2: null };
 
 function applyHostState(data) {
   // WICHTIG: Der Client führt seine eigene Interpolations-Uhr (world.elapsedMs)
@@ -3758,8 +3873,8 @@ function applyHostState(data) {
   // an der geänderten Tick-Nummer) wird die Uhr daher exakt auf den
   // Tick-Beginn zurückgesetzt, damit die Interpolation (prevCol -> col)
   // wieder sauber bei 0 startet und synchron zum Host abläuft.
-  const isNewWorldTick = data.tick !== world.tick;
-  world.tick = data.tick;
+  const isNewWorldTick = typeof data.tick === "number" && data.tick !== world.tick;
+  if (typeof data.tick === "number") world.tick = data.tick;
   frogs.p1.row = data.frogs.p1.row; frogs.p1.col = data.frogs.p1.col; frogs.p1.squash = data.frogs.p1.squash;
   // Solange eigene Befehle noch nicht vom Host bestätigt sind, behält der
   // Client die vorhergesagte Position seines Frosches (verhindert Zurückruckeln).
@@ -3768,9 +3883,9 @@ function applyHostState(data) {
     frogs.p2.row = data.frogs.p2.row; frogs.p2.col = data.frogs.p2.col; frogs.p2.squash = data.frogs.p2.squash;
   }
 
-  world.cars = data.cars;
-  world.logs = data.logs;
-  world.lilyPads = data.lilyPads;
+  if (data.cars) world.cars = data.cars;
+  if (data.logs) world.logs = data.logs;
+  if (data.lilyPads) world.lilyPads = data.lilyPads;
 
   if (isNewWorldTick) {
     world.elapsedMs = 0;
@@ -3795,15 +3910,21 @@ function applyHostState(data) {
     state.players[pid].selected = incoming.selected;
     state.players[pid].comboLevel = incoming.comboLevel;
 
-    buildResourceBars(pid);
-    updateDpad(pid);
-    buildSpecialSlots(pid);
-    renderMatch3Grid(pid);
+    // DOM nur neu aufbauen, wenn sich die Daten dieses Spielers geändert haben
+    // (spart auf dem Client viel Arbeit bei häufigen Nachrichten).
+    const sig = JSON.stringify([incoming.resources, incoming.specialSlots, state.players[pid].board, incoming.selected, state.destroyerMode]);
+    if (sig !== applySigs[pid]) {
+      applySigs[pid] = sig;
+      buildResourceBars(pid);
+      updateDpad(pid);
+      buildSpecialSlots(pid);
+      renderMatch3Grid(pid);
+    }
   });
 
   state.wins = data.wins;
   state.gameOver = data.gameOver;
-  HEDGE_GOAL_COLS = data.hedgeGoals;
+  if (data.hedgeGoals) HEDGE_GOAL_COLS = data.hedgeGoals;
   usedGoalCols = new Set(data.usedGoalCols);
   if (data.enabledPowerups) {
     state.enabledPowerups = data.enabledPowerups;
@@ -3818,7 +3939,18 @@ function applyHostState(data) {
 function handlePeerData(data) {
   if (!data || !data.type) return;
   lastPeerMsgTime = performance.now();
-  if (data.type === "ping") return;
+  if (data.type === "ping") {
+    sendPeerCommand({ type: "pong", t: data.t });
+    return;
+  }
+  if (data.type === "pong") {
+    if (typeof data.t === "number") {
+      const rtt = performance.now() - data.t;
+      netLatencyMs = netLatencyMs === null ? rtt : netLatencyMs * 0.6 + rtt * 0.4;
+      renderNetInfo();
+    }
+    return;
+  }
 
   if (data.type === "end") {
     if (state.started) endGame(false, "notice_peer_ended");
@@ -3865,19 +3997,19 @@ function handlePeerData(data) {
     if (data.playerId !== "p2") return; // der Gast darf nur seinen eigenen Frosch steuern
     if (typeof data.seq === "number") state.guestAckSeq = data.seq;
     performDirectionMove(data.playerId, data.direction);
-    broadcastFullState();
+    broadcastFullState(true);
     return;
   }
   if (data.type === "cmd_cell_click") {
     if (!isOnlineHost()) return;
     hostApplyCellClick(data.playerId, data.r, data.c);
-    broadcastFullState();
+    broadcastFullState(true);
     return;
   }
   if (data.type === "cmd_activate_special") {
     if (!isOnlineHost()) return;
     activateSpecial(data.playerId, data.idx);
-    broadcastFullState();
+    broadcastFullState(true);
     return;
   }
   if (data.type === "point") {
@@ -4208,6 +4340,8 @@ function resetGame() {
     // Simulationen. Er wartet auf den nächsten vollständigen Host-Broadcast.
     // Die beim Laden lokal erzeugten Felder (mit ALLEN Icons) werden verworfen,
     // damit nie Icons sichtbar sind, die der Host abgeschaltet hat.
+    applySigs.p1 = null;
+    applySigs.p2 = null;
     ["p1", "p2"].forEach(pid => {
       state.players[pid].board = null;
       const grid = document.getElementById("match3-grid-" + pid);
