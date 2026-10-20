@@ -275,6 +275,23 @@
   }
   .amiga-btn:hover { background: var(--amiga-orange); color: var(--amiga-bg-deep); }
   .amiga-btn.active { background: var(--amiga-green); color: var(--amiga-bg-deep); border-color: var(--amiga-green); }
+  #title-peer-remote-id, #peer-remote-id {
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .amiga-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  #title-peer-my-id {
+    color: var(--amiga-cyan);
+    font-size: 1.1rem;
+    font-weight: bold;
+    letter-spacing: 4px;
+    word-break: break-all;
+    cursor: pointer;
+  }
+  #title-peer-my-id:hover { text-decoration: underline; }
   .amiga-btn.muted { background: var(--amiga-red); color: var(--amiga-white); }
 
   #volume-slider {
@@ -1058,7 +1075,8 @@
           <span data-i18n="online_my_id">Deine ID</span>
           <span id="title-peer-my-id">–</span>
         </div>
-        <p class="online-hint" data-i18n="online_host_hint">Diese ID an einen Freund weitergeben, damit er sich verbinden kann — oder unten eine erhaltene ID eingeben, um beizutreten.</p>
+        <p class="online-hint" data-i18n="online_host_hint">Den Link kopieren und weitergeben (oder den Code), damit sich ein Freund verbindet — oder unten einen erhaltenen Code eingeben, um beizutreten.</p>
+        <div class="row"><button id="title-quick-share-btn" class="amiga-btn" style="flex: 1;" data-i18n="share_link_btn" disabled>🔗 LINK KOPIEREN</button></div>
         <div class="row">
           <input id="title-peer-remote-id" type="text" class="amiga-input" data-i18n-placeholder="online_remote_placeholder" placeholder="Peer-ID eingeben">
           <button id="title-peer-connect-btn" class="amiga-btn" data-i18n="online_connect">VERBINDEN</button>
@@ -1321,9 +1339,9 @@ const CONFIG = {
       mode_status_ai_hard: "Vs. KI (Schwer)",
       mode_status_online: "Online-Modus",
       online_section: "Online (PeerJS)",
-      online_my_id: "Deine ID",
-      online_remote_placeholder: "Peer-ID eingeben",
-      online_host_hint: "Diese ID an einen Freund weitergeben, damit er sich verbinden kann — oder unten eine erhaltene ID eingeben, um beizutreten.",
+      online_my_id: "Dein Code",
+      online_remote_placeholder: "Code eingeben",
+      online_host_hint: "Den Link kopieren und weitergeben (oder den Code), damit sich ein Freund verbindet — oder unten einen erhaltenen Code eingeben, um beizutreten.",
       online_connect: "VERBINDEN",
       online_status_disconnected: "Nicht verbunden",
       online_status_host: "Verbunden (Host)",
@@ -1352,8 +1370,14 @@ const CONFIG = {
       notice_disconnected: "Verbindung zum Mitspieler verloren — das Spiel wurde beendet.",
       powerup_host_hint: "Online gilt die Einstellung des Hosts für beide Spieler.",
       online_status_connecting: "Verbinde …",
+      share_link_btn: "🔗 LINK KOPIEREN",
+      share_copied: "✔ LINK KOPIERT!",
+      share_copy_manually: "Link manuell kopieren:",
+      id_copied: "✔ kopiert",
       online_status_slow: "Verbindung dauert ungewöhnlich lange — Netzwerk/Firewall prüfen oder erneut verbinden.",
       online_status_failed: "Verbindung fehlgeschlagen — bitte erneut verbinden.",
+      online_status_badcode: "Ungültiger Code — er besteht aus 4 Zeichen (ohne 0, O, 1, I).",
+      online_status_notfound: "Code nicht gefunden — stimmt der Code und läuft das Spiel des Hosts noch?",
       net_direct: "direkt",
       net_relay: "über Relay-Server (langsamer)",
       title_peer_is_ready: "Mitspieler ist bereit — jetzt SPIEL STARTEN drücken",
@@ -1388,9 +1412,9 @@ const CONFIG = {
       mode_status_ai_hard: "Vs. AI (Hard)",
       mode_status_online: "Online Mode",
       online_section: "Online (PeerJS)",
-      online_my_id: "Your ID",
-      online_remote_placeholder: "Enter peer ID",
-      online_host_hint: "Share this ID with a friend so they can connect — or enter a received ID below to join.",
+      online_my_id: "Your code",
+      online_remote_placeholder: "Enter code",
+      online_host_hint: "Copy and send the link (or the code) so a friend can connect — or enter a received code below to join.",
       online_connect: "CONNECT",
       online_status_disconnected: "Not connected",
       online_status_host: "Connected (Host)",
@@ -1419,8 +1443,14 @@ const CONFIG = {
       notice_disconnected: "Connection to the other player was lost — the game has ended.",
       powerup_host_hint: "Online, the host's setting applies to both players.",
       online_status_connecting: "Connecting …",
+      share_link_btn: "🔗 COPY LINK",
+      share_copied: "✔ LINK COPIED!",
+      share_copy_manually: "Copy the link manually:",
+      id_copied: "✔ copied",
       online_status_slow: "Connecting is taking unusually long — check network/firewall or reconnect.",
       online_status_failed: "Connection failed — please reconnect.",
+      online_status_badcode: "Invalid code — it has 4 characters (no 0, O, 1, I).",
+      online_status_notfound: "Code not found — is the code correct and is the host's game still open?",
       net_direct: "direct",
       net_relay: "via relay server (slower)",
       title_peer_is_ready: "Other player is ready — press START GAME",
@@ -3608,6 +3638,8 @@ document.querySelectorAll("#mode-group .lang-btn").forEach(btn => {
    Zustands-Snapshot seines eigenen Spielers an den Peer. */
 let peer = null;
 let peerConn = null;
+let myPeerId = null;
+let pendingJoinId = null;
 
 /* Aktualisiert Peer-ID/Status an BEIDEN Stellen gleichzeitig (Modal und
    Titelbildschirm), damit die Host-Informationen sichtbar sind, egal wo
@@ -3617,6 +3649,8 @@ function setPeerIdDisplay(id) {
     const el = document.getElementById(elId);
     if (el) el.textContent = id;
   });
+  const shareBtn = document.getElementById("title-quick-share-btn");
+  if (shareBtn) shareBtn.disabled = !(id && id !== "–" && id !== "…");
 }
 
 function setPeerStatusDisplay(text) {
@@ -3626,6 +3660,29 @@ function setPeerStatusDisplay(text) {
   });
 }
 
+/* Kurze, gut lesbare Peer-ID: "frog-" + 4 Zeichen (ohne 0/O/1/I). Auf dem Bildschirm
+   und im Einladungslink erscheint nur der kurze Teil. */
+const PEER_ID_PREFIX = "frog-";
+const PEER_ID_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+let peerIdAttempts = 0;
+
+function generateShortCode() {
+  const bytes = new Uint8Array(4);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  // 256 ist durch 32 teilbar -> keine Verzerrung der Zeichenverteilung
+  return Array.from(bytes, b => PEER_ID_CHARS.charAt(b % PEER_ID_CHARS.length)).join("");
+}
+
+/* Macht aus Eingabe/Link-Parameter einen gültigen Code (z. B. " frog-8f3a " -> "8F3A"). */
+function normalizeJoinCode(input) {
+  const code = String(input || "").trim().toUpperCase().replace(/^FROG-/, "");
+  return /^[2-9A-HJ-NP-Z]{4}$/.test(code) ? code : null;
+}
+
 function initPeer() {
   if (peer) return;
   const PeerCtor = window.Peer;
@@ -3633,21 +3690,62 @@ function initPeer() {
     setPeerStatusDisplay("PeerJS nicht verfügbar");
     return;
   }
-  peer = new PeerCtor();
-  setPeerIdDisplay("…"); // ID wird vom Server vergeben
 
-  peer.on("open", id => {
-    setPeerIdDisplay(id);
+  const thisPeer = new PeerCtor(PEER_ID_PREFIX + generateShortCode());
+  peer = thisPeer;
+  setPeerIdDisplay("…"); // Code wird beim Server angemeldet
+
+  thisPeer.on("open", id => {
+    if (peer !== thisPeer) return;
+    peerIdAttempts = 0;
+    myPeerId = id.replace(PEER_ID_PREFIX, ""); // nur der kurze Teil wird angezeigt/geteilt
+    setPeerIdDisplay(myPeerId);
+    // Beitritt per Einladungslink: verbinden, sobald der eigene Code steht.
+    if (pendingJoinId) {
+      const target = pendingJoinId;
+      pendingJoinId = null;
+      connectToPeer(target);
+    }
   });
 
-  peer.on("connection", conn => {
+  thisPeer.on("connection", conn => {
+    if (peer !== thisPeer) return;
+    // Es besteht schon eine Verbindung: weitere Anfragen abweisen (kurzer Code ist leichter zu erraten).
+    if (peerConn && peerConn.open) {
+      conn.on("open", () => conn.close());
+      return;
+    }
     peerConn = conn;
     state.peerRole = "host";
     wireConnection();
   });
 
-  peer.on("error", err => {
-    setPeerStatusDisplay("Fehler: " + (err && err.type ? err.type : err));
+  thisPeer.on("error", err => {
+    if (peer !== thisPeer) return;
+    const type = err && err.type ? err.type : String(err);
+
+    // Code zufällig schon vergeben: mit neuem Code erneut versuchen.
+    if (type === "unavailable-id" && peerIdAttempts < 8) {
+      peerIdAttempts++;
+      try { thisPeer.destroy(); } catch (e) { /* bereits zerstört */ }
+      peer = null;
+      initPeer();
+      return;
+    }
+
+    // Beitritts-Code existiert nicht (falsch getippt oder Host-Seite geschlossen).
+    if (type === "peer-unavailable") {
+      clearConnectTimers();
+      if (peerConn && !peerConn.open) {
+        peerConn = null;
+        state.peerRole = null;
+      }
+      setPeerStatusDisplay(t("online_status_notfound"));
+      updateStartReadiness();
+      return;
+    }
+
+    setPeerStatusDisplay("Fehler: " + type);
   });
 }
 
@@ -3659,10 +3757,15 @@ function clearConnectTimers() {
 }
 
 function connectToPeer(remoteId) {
-  if (!peer || !remoteId) return;
+  if (!peer) return;
+  const code = normalizeJoinCode(remoteId);
+  if (!code) {
+    setPeerStatusDisplay(t("online_status_badcode"));
+    return;
+  }
   clearConnectTimers();
   // JSON statt BinaryPack: schlankere Verarbeitung der Zustandsnachrichten.
-  peerConn = peer.connect(remoteId, { serialization: "json", reliable: true });
+  peerConn = peer.connect(PEER_ID_PREFIX + code, { serialization: "json", reliable: true });
   state.peerRole = "guest";
   setPeerStatusDisplay(t("online_status_connecting"));
   const conn = peerConn;
@@ -3790,6 +3893,9 @@ function teardownPeer() {
     peer = null;
   }
   state.peerRole = null;
+  myPeerId = null;
+  pendingJoinId = null;
+  peerIdAttempts = 0;
   setPeerIdDisplay("–");
   setPeerStatusDisplay(t("online_status_disconnected"));
   clearConnectTimers();
@@ -4037,6 +4143,80 @@ document.getElementById("title-peer-connect-btn").addEventListener("click", () =
   const remoteId = input ? input.value.trim() : "";
   if (remoteId) connectToPeer(remoteId);
 });
+
+/* ---------- Einladungslink: teilen/kopieren und automatisch beitreten ---------- */
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    // weiter mit dem Ersatzweg
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function buildInviteUrl() {
+  // Volle Adresse ohne bestehende Parameter (funktioniert auch bei lokal geöffneten Dateien).
+  const base = window.location.href.split(/[?#]/)[0];
+  return base + "?join=" + encodeURIComponent(myPeerId);
+}
+
+async function copyInviteLink() {
+  if (!myPeerId) return;
+  const inviteUrl = buildInviteUrl();
+
+  const ok = await copyTextToClipboard(inviteUrl);
+  if (ok) {
+    const btn = document.getElementById("title-quick-share-btn");
+    if (btn) {
+      btn.textContent = t("share_copied");
+      setTimeout(() => { btn.textContent = t("share_link_btn"); }, 2000);
+    }
+  } else {
+    // Zwischenablage nicht erlaubt: Link zum manuellen Kopieren anzeigen.
+    window.prompt(t("share_copy_manually"), inviteUrl);
+  }
+}
+
+async function copyOwnPeerId() {
+  if (!myPeerId) return;
+  const ok = await copyTextToClipboard(myPeerId);
+  const el = document.getElementById("title-peer-my-id");
+  if (el && ok) {
+    el.textContent = t("id_copied");
+    setTimeout(() => { el.textContent = myPeerId || "–"; }, 1200);
+  }
+}
+
+/* Öffnet jemand einen Einladungslink (?join=ID), wird automatisch der
+   Online-Modus gewählt und die Verbindung aufgebaut, sobald die eigene ID steht. */
+function checkAutoJoinFromUrl() {
+  const joinCode = normalizeJoinCode(new URLSearchParams(window.location.search).get("join"));
+  if (!joinCode) return;
+  pendingJoinId = joinCode;
+  ["title-peer-remote-id", "peer-remote-id"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = joinCode;
+  });
+  setMode("online");
+}
+
+document.getElementById("title-quick-share-btn").addEventListener("click", copyInviteLink);
+document.getElementById("title-peer-my-id").addEventListener("click", copyOwnPeerId);
 
 /* ---------- Match-Historie (localStorage) ---------- */
 const MATCH_HISTORY_KEY = "amigaFroggerFastestFrogs_v3";
@@ -4472,6 +4652,7 @@ function init() {
   updateGridAccessibility();
   updateStartReadiness();
   setInterval(updateAllStatusAreas, 200);
+  checkAutoJoinFromUrl();
   requestAnimationFrame(renderLoop);
 }
 
