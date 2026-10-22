@@ -370,12 +370,6 @@
     align-items: start;
   }
 
-  @media (max-width: 980px) {
-    #mainframe {
-      grid-template-columns: 1fr;
-    }
-  }
-
   .player-panel {
     background: var(--amiga-panel);
     border: 2px solid var(--amiga-border);
@@ -1031,6 +1025,154 @@
     color: var(--amiga-yellow);
     letter-spacing: 0.5px;
   }
+
+  /* =========================================================
+     MOBIL / SCHMALE BILDSCHIRME
+     Desktop (> 980px) bleibt unverändert. Darunter gilt ein kompaktes
+     Layout: Spielfeld oben, darunter Match-3 + Steuerkreuz des eigenen
+     Spielers, das Gegner-Fenster ist eingeklappt. Alle Größen leiten sich
+     aus Bildschirmbreite/-höhe ab, damit nichts abgeschnitten wird.
+     ========================================================= */
+  .score-display:empty { display: none; }
+  :root { --vh100: 100vh; }
+  @supports (height: 100dvh) { :root { --vh100: 100dvh; } }
+
+  /* Feste CSS-Größe; die Auflösung der Zeichenfläche passt ein Skript an die Pixeldichte an */
+  #game-canvas { width: 480px; height: 480px; }
+  html { -webkit-tap-highlight-color: transparent; }
+
+  @media (max-width: 980px) {
+    :root {
+      --hdr-h: 48px;                       /* wird per Skript exakt gemessen */
+      --dp: clamp(36px, calc((100vw - 47px) / 9), 44px);   /* Taste Steuerkreuz */
+      --ctrl-w: calc(var(--dp) * 3);
+      --grid-w: min(calc(100vw - 16px - var(--ctrl-w) - 8px), 340px);
+      --chrome-h: 96px;                    /* Rahmen, Abstände, Gegner-Leiste */
+      --cv: clamp(232px, calc(var(--vh100) - var(--hdr-h) - var(--grid-w) - var(--chrome-h)), min(calc(100vw - 18px), 480px));
+    }
+
+    html, body { overscroll-behavior: none; touch-action: manipulation; }
+    body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    input { -webkit-user-select: text; user-select: text; }
+    button, .match3-cell, .special-slot { touch-action: manipulation; }
+
+    /* --- Kopfzeile --- */
+    #header-bar { padding: 3px 8px; gap: 6px; border-bottom-width: 2px; }
+    #header-left { gap: 5px; row-gap: 3px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
+    #game-title { font-size: 0.72rem; letter-spacing: 1px; }
+    #match-status, .score-display { font-size: 0.56rem; padding: 3px 6px; letter-spacing: 0.5px; }
+    #header-right { gap: 6px; flex: 0 0 auto; }
+    #settings-btn, #end-game-btn { width: 36px; height: 36px; font-size: 1rem; }
+
+    /* --- Anordnung: Spielfeld, eigenes Fenster, Gegner-Leiste --- */
+    #mainframe {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "cv" "own" "opp";
+      flex: 0 0 auto;
+      gap: 4px;
+      padding: 4px;
+      width: 100%;
+      max-width: 560px;
+      margin: 0 auto;
+      box-sizing: border-box;
+      justify-items: center;
+      align-content: start;
+    }
+    #canvas-column { grid-area: cv; gap: 0; }
+    #canvas-caption { display: none; }
+    #game-canvas-frame { padding: 3px; border-width: 2px; border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+    #game-canvas { width: var(--cv); height: var(--cv); image-rendering: auto; }
+    #footer-bar { padding: 6px; font-size: 0.6rem; }
+
+    /* --- Spielerfenster: [Match-3-Feld | Steuerkreuz + Slots] --- */
+    .player-panel.is-own { grid-area: own; }
+    .player-panel.is-opponent { grid-area: opp; }
+    .player-panel {
+      display: grid;
+      grid-template-columns: var(--grid-w) var(--ctrl-w);
+      grid-template-areas: "head head" "grid dpad" "grid slots" "grid status";
+      grid-template-rows: auto auto auto 1fr;
+      gap: 4px 8px;
+      justify-content: center;
+      align-content: start;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px;
+      box-shadow: none;
+    }
+    .panel-heading { grid-area: head; font-size: 0.6rem; letter-spacing: 1px; padding-bottom: 3px; }
+    .match3-grid { grid-area: grid; width: var(--grid-w); box-sizing: border-box; gap: 2px; padding: 3px; align-self: start; }
+    .match3-cell { font-size: clamp(0.85rem, calc(var(--grid-w) / 12), 1.4rem); }
+    .resource-bars { display: none; }       /* Restzüge stehen direkt auf den Steuerkreuz-Tasten */
+
+    .dpad-wrapper { grid-area: dpad; padding: 0; justify-self: center; align-self: start; }
+    .dpad { width: var(--ctrl-w); height: var(--ctrl-w); }
+    .dpad-btn { width: var(--dp); height: var(--dp); font-size: 1rem; }
+    .dpad-btn.up    { left: var(--dp); top: 0; }
+    .dpad-btn.down  { left: var(--dp); bottom: 0; }
+    .dpad-btn.left  { left: 0; top: var(--dp); }
+    .dpad-btn.right { right: 0; top: var(--dp); }
+    .dpad-center { top: var(--dp); left: var(--dp); width: var(--dp); height: var(--dp); }
+    .dpad-btn::after {
+      content: attr(data-count);
+      position: absolute;
+      right: 3px;
+      bottom: 1px;
+      font-size: 0.5rem;
+      color: var(--amiga-yellow);
+      pointer-events: none;
+    }
+    .special-slots { grid-area: slots; gap: 6px; align-self: start; }
+    .special-slot { width: calc((var(--ctrl-w) - 6px) / 2); height: 40px; }
+    .status-area { grid-area: status; min-height: 0; font-size: 0.55rem; overflow: hidden; align-self: start; }
+
+    /* --- Gegner-Fenster: eingeklappte Leiste, per Tipp aufklappbar --- */
+    .player-panel.is-opponent > .panel-heading { cursor: pointer; padding: 4px 0 3px; }
+    .player-panel.is-opponent > .panel-heading::after { content: " \25BE"; color: var(--amiga-cyan); }
+    .player-panel.is-opponent.expanded > .panel-heading::after { content: " \25B4"; }
+    .player-panel.is-opponent:not(.expanded) { grid-template-areas: "head head"; padding: 2px 4px; }
+    .player-panel.is-opponent:not(.expanded) > :not(.panel-heading) { display: none; }
+
+    /* --- Fenster und Overlays --- */
+    #modal-close { width: 34px; height: 34px; font-size: 0.9rem; }
+    #settings-modal { width: min(calc(100vw - 16px), 460px); max-height: calc(var(--vh100) - 16px); overflow-y: auto; }
+    #title-box { max-height: calc(var(--vh100) * 0.94); }
+    #victory-box { padding: 18px 16px; max-width: calc(100vw - 24px); box-sizing: border-box; }
+  }
+
+  /* --- Querformat (Handy gedreht): Spielfeld links, eigenes Fenster rechts --- */
+  @media (max-width: 980px) and (orientation: landscape) and (max-height: 560px) {
+    :root {
+      --hdr-h: 40px;
+      --dp: clamp(36px, calc(var(--vh100) / 9), 44px);
+      --cv: min(calc(var(--vh100) - var(--hdr-h) - 20px), calc(100vw * 0.4), 480px);
+      --grid-w: min(calc(var(--vh100) - var(--hdr-h) - 74px), calc(100vw - var(--cv) - 16px - 26px - var(--ctrl-w) - 8px), 340px);
+    }
+    #mainframe {
+      max-width: none;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas: "cv own" "cv opp";
+      justify-items: start;
+      gap: 4px 8px;
+    }
+    #header-bar { padding: 3px 8px; }
+    #settings-btn, #end-game-btn { width: 32px; height: 32px; font-size: 0.95rem; }
+    #canvas-column { align-self: start; }
+    .player-panel { justify-self: stretch; }
+    .player-panel.is-own > .panel-heading { display: none; }
+    .player-panel.is-own { grid-template-areas: "grid dpad" "grid slots" "grid status"; grid-template-rows: auto auto 1fr; }
+  }
+
+  /* --- Touch-Geräte: kein "hängendes" Hover, Eingabefelder ohne Zoom (iOS) --- */
+  @media (hover: none) {
+    .dpad-btn:hover { background: var(--amiga-panel-lt); }
+    #settings-btn:hover, #title-settings-btn:hover { background: var(--amiga-panel-lt); transform: none; }
+    #end-game-btn:hover { background: var(--amiga-panel); color: var(--amiga-red); transform: none; }
+  }
+  @media (pointer: coarse) {
+    .amiga-input { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -1652,6 +1794,7 @@ function updateDpad(playerId) {
   const controllable = typeof isLocalPlayerAllowed === "function" ? isLocalPlayerAllowed(playerId) : true;
   CONFIG.DIRECTIONS.forEach(dir => {
     const btn = dpad.querySelector(`.dpad-btn.${dir}`);
+    btn.dataset.count = res[dir]; // Anzeige der Restzüge (im kompakten Layout sichtbar)
     if (res[dir] <= 0 || !controllable) {
       btn.classList.add("disabled");
     } else {
@@ -1845,9 +1988,27 @@ function triggerCheat() {
 /* ---------- Canvas-Grundlagen ---------- */
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d");
+
+/* Logische Spielfeldgröße (Zeichen-Koordinaten). Die tatsächliche Auflösung der
+   Zeichenfläche ist ein ganzzahliges Vielfaches davon (scharf auf Handy-Displays). */
+const LOGICAL_W = 480;
+const LOGICAL_H = 480;
+let canvasScale = 1;
+
+function fitCanvasResolution() {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  const k = Math.min(3, Math.max(1, Math.ceil((rect.width * dpr) / LOGICAL_W - 0.01)));
+  if (k !== canvasScale) {
+    canvasScale = k;
+    canvas.width = LOGICAL_W * k;
+    canvas.height = LOGICAL_H * k;
+  }
+}
 const CELL = 40;
-const COLS = canvas.width / CELL;   // 12
-const ROWS = canvas.height / CELL;  // 14
+const COLS = LOGICAL_W / CELL;   // 12
+const ROWS = LOGICAL_H / CELL;  // 14
 
 /* Zeilentypen des Frogger-Feldes, von oben (Ziel) nach unten (Start).
    Entspricht (von unten gelesen): 2x Rasen-Start, 3 Autos, 3 Autos + 1 Bus,
@@ -2385,12 +2546,12 @@ function drawFrostOverlay() {
   if (!world.frost.active) return;
   ctx.save();
   ctx.fillStyle = "rgba(150, 210, 255, 0.22)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
   ctx.strokeStyle = "rgba(220, 245, 255, 0.5)";
   ctx.lineWidth = 1;
   for (let i = 0; i < 26; i++) {
-    const x = (i * 53) % canvas.width;
-    const y = (i * 97) % canvas.height;
+    const x = (i * 53) % LOGICAL_W;
+    const y = (i * 97) % LOGICAL_H;
     ctx.beginPath();
     ctx.moveTo(x - 5, y);
     ctx.lineTo(x + 5, y);
@@ -2400,9 +2561,9 @@ function drawFrostOverlay() {
   }
   const pct = world.frost.timerMs / world.frost.totalMs;
   ctx.fillStyle = "rgba(150,210,255,0.9)";
-  ctx.fillRect(canvas.width / 2 - 60, 8, 120 * pct, 6);
+  ctx.fillRect(LOGICAL_W / 2 - 60, 8, 120 * pct, 6);
   ctx.strokeStyle = "#eef0ff";
-  ctx.strokeRect(canvas.width / 2 - 60, 8, 120, 6);
+  ctx.strokeRect(LOGICAL_W / 2 - 60, 8, 120, 6);
   ctx.restore();
 }
 
@@ -2415,7 +2576,7 @@ function drawField() {
     if (type === "lily") color = "#134a3e";
     if (type === "hedge") color = "#1e5c2e";
     ctx.fillStyle = color;
-    ctx.fillRect(0, row * CELL, canvas.width, CELL);
+    ctx.fillRect(0, row * CELL, LOGICAL_W, CELL);
   });
 
   ctx.strokeStyle = "rgba(255,255,255,0.25)";
@@ -2424,7 +2585,7 @@ function drawField() {
     if (type !== "road") return;
     ctx.beginPath();
     ctx.moveTo(0, row * CELL + CELL / 2);
-    ctx.lineTo(canvas.width, row * CELL + CELL / 2);
+    ctx.lineTo(LOGICAL_W, row * CELL + CELL / 2);
     ctx.stroke();
   });
   ctx.setLineDash([]);
@@ -2589,7 +2750,7 @@ function drawCheckpointFlag() {
     const flagColor = playerId === "p1" ? "#6bcf7f" : "#ff5555";
     const y = cp.row * CELL + CELL;
     const isLeft = playerId === "p1";
-    const x = isLeft ? 5 : canvas.width - 5;
+    const x = isLeft ? 5 : LOGICAL_W - 5;
     const dir = isLeft ? 1 : -1; // Fahnentuch zeigt zur Spielfeldmitte
 
     ctx.strokeStyle = "#c9c9c9";
@@ -2763,8 +2924,9 @@ function renderLoop(now) {
     checkContinuousVehicleOverlap(alpha);
   }
 
+  ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
   ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
   ctx.translate(world.shake.x, world.shake.y);
 
   drawField();
@@ -3243,6 +3405,21 @@ function isOnlineHost() {
 /* Spiegelt die Zugriffskontrolle visuell auf die Match-3-Felder:
    fremde Felder sind gesperrt (abgedunkelt, keine Klicks), außer ein
    aktiver Zerstörer öffnet sie gerade gezielt. */
+/* Markiert, welches Fenster "meins" ist und welches das des Gegners
+   (im kompakten Layout steht das eigene unter dem Spielfeld). */
+function syncPanelRoles() {
+  const localId = isOnlineGuest() ? "p2" : "p1";
+  ["p1", "p2"].forEach(pid => {
+    const panel = document.getElementById("panel-" + pid);
+    if (!panel) return;
+    panel.classList.toggle("is-own", pid === localId);
+    panel.classList.toggle("is-opponent", pid !== localId);
+  });
+}
+
+let destroyerWasOn = false;
+let destroyerAutoExpanded = false;
+
 function updateGridAccessibility() {
   ["p1", "p2"].forEach(pid => {
     const grid = document.getElementById(`match3-grid-${pid}`);
@@ -3255,6 +3432,52 @@ function updateGridAccessibility() {
       !!(state.destroyerMode && !ownedLocally && clickable)
     );
   });
+
+  syncPanelRoles();
+
+  // Aktiviere ich einen Zerstörer, braucht man das Gegner-Feld: Fenster
+  // automatisch aufklappen und ins Bild scrollen; danach wieder einklappen.
+  const localId = isOnlineGuest() ? "p2" : "p1";
+  const destroyerOn = !!(state.destroyerMode && state.destroyerMode.charges > 0 && state.destroyerMode.ownerId === localId);
+  const oppPanel = document.querySelector(".player-panel.is-opponent");
+  if (oppPanel) {
+    if (destroyerOn && !destroyerWasOn) {
+      destroyerAutoExpanded = !oppPanel.classList.contains("expanded");
+      oppPanel.classList.add("expanded");
+      if (compactMQ.matches) oppPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (!destroyerOn && destroyerWasOn) {
+      if (destroyerAutoExpanded) oppPanel.classList.remove("expanded");
+      destroyerAutoExpanded = false;
+    }
+  }
+  destroyerWasOn = destroyerOn;
+}
+
+/* ---------- Kompaktes (mobiles) Layout ---------- */
+const compactMQ = window.matchMedia("(max-width: 980px)");
+
+function setupMobileLayout() {
+  // Höhe der Kopfzeile exakt messen (geht in die Größe des Spielfelds ein)
+  const header = document.getElementById("header-bar");
+  const applyHeaderHeight = () => document.documentElement.style.setProperty("--hdr-h", header.offsetHeight + "px");
+  applyHeaderHeight();
+  if (window.ResizeObserver) {
+    new ResizeObserver(applyHeaderHeight).observe(header);
+    new ResizeObserver(fitCanvasResolution).observe(canvas);
+  }
+  window.addEventListener("resize", fitCanvasResolution);
+  fitCanvasResolution();
+
+  // Gegner-Fenster per Tipp auf die Überschrift auf-/zuklappen
+  ["p1", "p2"].forEach(pid => {
+    const panel = document.getElementById("panel-" + pid);
+    const heading = panel.querySelector(".panel-heading");
+    heading.addEventListener("click", () => {
+      if (!compactMQ.matches || !panel.classList.contains("is-opponent")) return;
+      panel.classList.toggle("expanded");
+    });
+  });
+  syncPanelRoles();
 }
 
 /* ---------- Vorausschauende Pfadvalidierung (für KI & zukünftige Erweiterungen) ----------
@@ -3615,6 +3838,7 @@ function updateStartReadiness() {
   }
   renderPowerupToggles(); // Sperre/Hinweis folgt Modus und Rolle
   renderNetInfo();
+  syncPanelRoles();
 }
 
 function updateMatchStatusText() {
@@ -4387,8 +4611,8 @@ function spawnFireworks() {
   let bursts = 0;
   if (fireworksInterval) clearInterval(fireworksInterval);
   fireworksInterval = setInterval(() => {
-    const x = 40 + Math.random() * (canvas.width - 80);
-    const y = 30 + Math.random() * (canvas.height * 0.5);
+    const x = 40 + Math.random() * (LOGICAL_W - 80);
+    const y = 30 + Math.random() * (LOGICAL_H * 0.5);
     const color = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
     spawnParticles(x, y, color, 26);
     bursts++;
@@ -4652,6 +4876,7 @@ function init() {
   updateGridAccessibility();
   updateStartReadiness();
   setInterval(updateAllStatusAreas, 200);
+  setupMobileLayout();
   checkAutoJoinFromUrl();
   requestAnimationFrame(renderLoop);
 }
